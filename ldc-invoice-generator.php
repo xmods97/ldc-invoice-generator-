@@ -2,7 +2,7 @@
 /**
  * Plugin Name: LDC Invoice Generator
  * Description: Private invoice/proposal builder with saved records, printing/PDF, JSON transfer, and email delivery.
- * Version: 0.9.2
+ * Version: 0.9.3
  * Author: Xmods
  * Author URI: https://github.com/xmods97
  * Update URI: https://github.com/xmods97/ldc-invoice-generator-
@@ -19,6 +19,7 @@ final class LDC_Invoice_Generator {
     private const RECORDS_OPTION = 'ldc_invoice_records';
     private const COMPANY_OPTION = 'ldc_invoice_company_settings';
     private const AUTO_UPDATE_OPTION = 'ldc_invoice_auto_updates';
+    private const AUTO_UPDATE_HOOK = 'ldc_invoice_auto_update_check';
     private const UPDATE_API = 'https://api.github.com/repos/xmods97/ldc-invoice-generator-/releases/latest';
     private const UPDATE_REPO = 'https://github.com/xmods97/ldc-invoice-generator-';
     private const UPDATE_ASSET = 'ldc-invoice-generator.zip';
@@ -44,6 +45,8 @@ final class LDC_Invoice_Generator {
         add_filter('auto_update_plugin', [$this, 'allow_automatic_updates'], 10, 2);
         add_filter('plugin_auto_update_setting_html', [$this, 'automatic_update_setting_html'], 10, 3);
         add_action('admin_post_ldc_toggle_auto_updates', [$this, 'toggle_automatic_updates']);
+        add_action(self::AUTO_UPDATE_HOOK, [$this, 'run_automatic_update']);
+        add_action('init', [$this, 'ensure_auto_update_schedule']);
     }
 
     public function register_menu(): void {
@@ -58,10 +61,10 @@ final class LDC_Invoice_Generator {
 
     private function load_assets(): void {
         $base = plugin_dir_url(__FILE__);
-        wp_enqueue_style('ldc-invoice-admin', $base . 'assets/admin.css', [], '0.9.2');
-        wp_enqueue_script('ldc-invoice-admin', $base . 'assets/admin.js', [], '0.9.2', true);
-        wp_enqueue_script('ldc-invoice-list', $base . 'assets/list.js', [], '0.9.2', true);
-        wp_enqueue_script('ldc-invoice-settings', $base . 'assets/settings.js', [], '0.9.2', true);
+        wp_enqueue_style('ldc-invoice-admin', $base . 'assets/admin.css', [], '0.9.3');
+        wp_enqueue_script('ldc-invoice-admin', $base . 'assets/admin.js', [], '0.9.3', true);
+        wp_enqueue_script('ldc-invoice-list', $base . 'assets/list.js', [], '0.9.3', true);
+        wp_enqueue_script('ldc-invoice-settings', $base . 'assets/settings.js', [], '0.9.3', true);
         $company = $this->get_company_settings();
         wp_localize_script('ldc-invoice-admin', 'LDCInvoice', [
             'ajaxUrl' => admin_url('admin-ajax.php'),
@@ -100,7 +103,7 @@ final class LDC_Invoice_Generator {
                 'default_tax_rate' => (string) max(0, (float) wp_unslash($_POST['default_tax_rate'] ?? '0')),
             ];
             update_option(self::COMPANY_OPTION, $settings, false);
-            update_option(self::AUTO_UPDATE_OPTION, !empty($_POST['auto_updates']), false);
+            $this->set_automatic_updates(!empty($_POST['auto_updates']));
             echo '<div class="notice notice-success"><p>Company settings saved.</p></div>';
         }
         $settings = $this->get_company_settings();
@@ -270,9 +273,44 @@ final class LDC_Invoice_Generator {
     public function toggle_automatic_updates(): void {
         if (!current_user_can('update_plugins')) { wp_die('You are not allowed to change plugin update settings.'); }
         check_admin_referer('ldc_toggle_auto_updates');
-        update_option(self::AUTO_UPDATE_OPTION, !empty($_GET['enabled']), false);
+        $this->set_automatic_updates(!empty($_GET['enabled']));
         wp_safe_redirect(admin_url('plugins.php'));
         exit;
+    }
+
+    private function set_automatic_updates(bool $enabled): void {
+        update_option(self::AUTO_UPDATE_OPTION, $enabled, false);
+        if ($enabled) {
+            $this->ensure_auto_update_schedule();
+            if (!wp_next_scheduled(self::AUTO_UPDATE_HOOK, ['immediate'])) {
+                wp_schedule_single_event(time() + 30, self::AUTO_UPDATE_HOOK, ['immediate']);
+            }
+        } else {
+            wp_clear_scheduled_hook(self::AUTO_UPDATE_HOOK);
+        }
+    }
+
+    public function ensure_auto_update_schedule(): void {
+        if (get_option(self::AUTO_UPDATE_OPTION, false) && !wp_next_scheduled(self::AUTO_UPDATE_HOOK)) {
+            wp_schedule_event(time() + 300, 'twicedaily', self::AUTO_UPDATE_HOOK);
+        }
+    }
+
+    public function run_automatic_update(): void {
+        if (!get_option(self::AUTO_UPDATE_OPTION, false) || get_transient('ldc_invoice_update_lock')) { return; }
+        set_transient('ldc_invoice_update_lock', 1, 5 * MINUTE_IN_SECONDS);
+        delete_site_transient('update_plugins');
+        wp_update_plugins();
+        $updates = get_site_transient('update_plugins');
+        $plugin_file = plugin_basename(__FILE__);
+        if (!is_object($updates) || empty($updates->response[$plugin_file])) {
+            delete_transient('ldc_invoice_update_lock');
+            return;
+        }
+        require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
+        $upgrader = new Plugin_Upgrader(new Automatic_Upgrader_Skin());
+        $upgrader->upgrade($plugin_file, ['clear_update_cache' => true]);
+        delete_transient('ldc_invoice_update_lock');
     }
 
     public function render_page(): void {
@@ -520,6 +558,10 @@ final class LDC_Invoice_Generator {
         }
     }
 
+    public static function deactivate(): void {
+        wp_clear_scheduled_hook(self::AUTO_UPDATE_HOOK);
+    }
+
     public function ensure_pages(): void {
         if (!get_page_by_path(self::PAGE_SLUG) || !get_page_by_path(self::LIST_PAGE_SLUG) || !get_page_by_path(self::SETTINGS_PAGE_SLUG)) { self::activate(); }
     }
@@ -592,7 +634,7 @@ final class LDC_Invoice_Generator {
             'default_tax_rate' => (string) max(0, (float) wp_unslash($_POST['default_tax_rate'] ?? '0')),
         ];
         update_option(self::COMPANY_OPTION, $settings, false);
-        update_option(self::AUTO_UPDATE_OPTION, !empty($_POST['auto_updates']), false);
+        $this->set_automatic_updates(!empty($_POST['auto_updates']));
         wp_send_json_success(['message' => 'Company settings saved.', 'settings' => $settings]);
     }
 
@@ -625,3 +667,4 @@ final class LDC_Invoice_Generator {
 
 new LDC_Invoice_Generator();
 register_activation_hook(__FILE__, ['LDC_Invoice_Generator', 'activate']);
+register_deactivation_hook(__FILE__, ['LDC_Invoice_Generator', 'deactivate']);
