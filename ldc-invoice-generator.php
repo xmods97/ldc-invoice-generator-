@@ -2,7 +2,7 @@
 /**
  * Plugin Name: LDC Invoice Generator
  * Description: Private invoice/proposal builder with saved records, printing/PDF, JSON transfer, and email delivery.
- * Version: 0.9.16
+ * Version: 0.9.17
  * Author: Xmods
  * Author URI: https://github.com/xmods97
  * Update URI: https://github.com/xmods97/ldc-invoice-generator-
@@ -11,7 +11,7 @@
 if (!defined('ABSPATH')) { exit; }
 
 final class LDC_Invoice_Generator {
-    private const VERSION = '0.9.16';
+    private const VERSION = '0.9.17';
     private const SLUG = 'ldc-invoice-generator';
     private const PAGE_SLUG = 'invoice-builder';
     private const LIST_PAGE_SLUG = 'invoice-list';
@@ -658,20 +658,12 @@ final class LDC_Invoice_Generator {
         $cc = sanitize_email(wp_unslash($_POST['cc'] ?? ''));
         $subject = sanitize_text_field(wp_unslash($_POST['subject'] ?? 'Invoice'));
         $message = sanitize_textarea_field(wp_unslash($_POST['message'] ?? ''));
-        $invoice = wp_kses_post(wp_unslash($_POST['invoice_html'] ?? ''));
         $pdf_data = (string) wp_unslash($_POST['pdf_data'] ?? '');
         $pdf_filename = sanitize_file_name(wp_unslash($_POST['pdf_filename'] ?? 'invoice.pdf'));
         if (!$recipient || !is_email($recipient)) { wp_send_json_error(['message' => 'Enter a valid client email address.'], 422); }
-        if ($invoice === '') { wp_send_json_error(['message' => 'Invoice content is empty.'], 422); }
         $headers = ['Content-Type: text/html; charset=UTF-8'];
         if ($cc && is_email($cc)) { $headers[] = 'Cc: ' . $cc; }
-        $email_css = '<style>'
-            . '.ldc-doc-header{display:flex;justify-content:space-between;min-height:80px}.ldc-doc-logo{display:block;width:300px;height:auto}.ldc-doc-date,.ldc-license{font:bold 14px Arial,sans-serif}.ldc-license{margin:0 0 24px}.ldc-info-table,.ldc-main-table{width:100%;border-collapse:collapse;table-layout:fixed}.ldc-info-table th,.ldc-info-table td{border:2px solid #315a8a;padding:8px 10px}.ldc-info-table th{background:#e9e6d5}.ldc-main-table{margin-top:24px;border:2px solid #111}.ldc-main-table td{border-right:2px solid #111;vertical-align:top}.ldc-main-table td:last-child{width:13%;border-right:0}.ldc-project-strip td{background:#e9e6d5;border-bottom:2px solid #111;padding:10px 14px}.ldc-doc-content{padding:16px 14px 28px}.ldc-doc-content h2{text-align:center;font-size:18px}.ldc-doc-content h3{font-size:16px;margin-top:22px}.ldc-rule{height:1px;background:#888;margin:24px 0}.ldc-footer-strip td{height:28px;background:#b8c68b;border-top:2px solid #111}.ldc-signatures{display:flex;gap:28px;margin-top:42px}.ldc-signature-line{width:50%;border-top:1px solid #111;padding-top:5px}.ldc-contact-footer{margin-top:32px;font:11px/1.35 Arial,sans-serif;text-align:left}'
-            . '.ldc-license-row{display:flex;justify-content:space-between;margin:30px 6px 28px;font:bold 14px Arial,sans-serif}.ldc-info-table{border:2px solid #315a8a}'
-            . '.ldc-price-copy{min-height:112px;padding:16px 10px}.ldc-includes-row td,.ldc-price-row td,.ldc-payment-row td{border-top:2px solid #111}.ldc-price-row td{height:38px}.ldc-price-row td:last-child{padding:5px 8px;font:italic 19px Georgia,serif}.ldc-payment-row td:first-child{padding:12px 8px 28px}.ldc-payment-row h3{font:bold italic 18px Georgia,serif}'
-            . '.ldc-scope-entry{position:relative}.ldc-scope-entry-price{position:absolute;left:calc(100% + 45px);top:24px;width:58px;font:italic 16px Georgia,serif;white-space:nowrap}'
-            . '</style>';
-        $body = $email_css . '<div style="font:16px/1.6 Arial,sans-serif;color:#202124;max-width:760px;margin:auto">' . wpautop(esc_html($message)) . '<hr style="border:0;border-top:1px solid #d7dce2;margin:28px 0">' . $invoice . '</div>';
+        $body = '<div style="font:16px/1.6 Arial,sans-serif;color:#202124;max-width:760px;margin:auto">' . wpautop(esc_html($message)) . '</div>';
         if (!preg_match('#^data:application/pdf;base64,#', $pdf_data)) { wp_send_json_error(['message' => 'PDF attachment could not be generated. Please try again.'], 422); }
         $pdf_binary = base64_decode(substr($pdf_data, strpos($pdf_data, ',') + 1), true);
         if ($pdf_binary === false || strncmp($pdf_binary, '%PDF', 4) !== 0) { wp_send_json_error(['message' => 'Generated PDF attachment is invalid.'], 422); }
