@@ -2,7 +2,7 @@
 /**
  * Plugin Name: LDC Invoice Generator
  * Description: Private invoice/proposal builder with saved records, printing/PDF, JSON transfer, and email delivery.
- * Version: 0.7.0
+ * Version: 0.8.0
  * Author: Invoice Builder
  * Update URI: https://github.com/xmods97/ldc-invoice-generator-
  */
@@ -13,6 +13,7 @@ final class LDC_Invoice_Generator {
     private const SLUG = 'ldc-invoice-generator';
     private const PAGE_SLUG = 'invoice-builder';
     private const LIST_PAGE_SLUG = 'invoice-list';
+    private const SETTINGS_PAGE_SLUG = 'invoice-settings';
     private const KEY_OPTION = 'ldc_invoice_access_key';
     private const RECORDS_OPTION = 'ldc_invoice_records';
     private const COMPANY_OPTION = 'ldc_invoice_company_settings';
@@ -25,10 +26,13 @@ final class LDC_Invoice_Generator {
         add_action('admin_enqueue_scripts', [$this, 'enqueue_assets']);
         add_shortcode('ldc_invoice_builder', [$this, 'render_frontend']);
         add_shortcode('ldc_invoice_list', [$this, 'render_list_frontend']);
+        add_shortcode('ldc_invoice_settings', [$this, 'render_settings_frontend']);
         add_action('init', [$this, 'ensure_pages']);
         add_action('template_redirect', [$this, 'serve_standalone_page']);
         add_action('wp_ajax_ldc_send_invoice', [$this, 'send_invoice']);
         add_action('wp_ajax_nopriv_ldc_send_invoice', [$this, 'send_invoice']);
+        add_action('wp_ajax_ldc_save_company_settings', [$this, 'save_company_settings_public']);
+        add_action('wp_ajax_nopriv_ldc_save_company_settings', [$this, 'save_company_settings_public']);
         foreach (['ldc_list_invoices', 'ldc_save_invoice', 'ldc_delete_invoice'] as $action) {
             add_action('wp_ajax_' . $action, [$this, 'manage_invoices']);
             add_action('wp_ajax_nopriv_' . $action, [$this, 'manage_invoices']);
@@ -49,9 +53,10 @@ final class LDC_Invoice_Generator {
 
     private function load_assets(): void {
         $base = plugin_dir_url(__FILE__);
-        wp_enqueue_style('ldc-invoice-admin', $base . 'assets/admin.css', [], '0.7.0');
-        wp_enqueue_script('ldc-invoice-admin', $base . 'assets/admin.js', [], '0.7.0', true);
-        wp_enqueue_script('ldc-invoice-list', $base . 'assets/list.js', [], '0.7.0', true);
+        wp_enqueue_style('ldc-invoice-admin', $base . 'assets/admin.css', [], '0.8.0');
+        wp_enqueue_script('ldc-invoice-admin', $base . 'assets/admin.js', [], '0.8.0', true);
+        wp_enqueue_script('ldc-invoice-list', $base . 'assets/list.js', [], '0.8.0', true);
+        wp_enqueue_script('ldc-invoice-settings', $base . 'assets/settings.js', [], '0.8.0', true);
         $company = $this->get_company_settings();
         wp_localize_script('ldc-invoice-admin', 'LDCInvoice', [
             'ajaxUrl' => admin_url('admin-ajax.php'),
@@ -60,6 +65,7 @@ final class LDC_Invoice_Generator {
             'logoUrl' => $this->get_logo_url(),
             'builderUrl' => add_query_arg('key', rawurlencode($this->get_access_key()), home_url('/' . self::PAGE_SLUG . '/')),
             'listUrl' => add_query_arg('key', rawurlencode($this->get_access_key()), home_url('/' . self::LIST_PAGE_SLUG . '/')),
+            'settingsUrl' => add_query_arg('key', rawurlencode($this->get_access_key()), home_url('/' . self::SETTINGS_PAGE_SLUG . '/')),
             'company' => $company,
         ]);
     }
@@ -219,10 +225,23 @@ final class LDC_Invoice_Generator {
         return (string) ob_get_clean();
     }
 
+    public function render_settings_frontend(): string {
+        $key = sanitize_text_field(wp_unslash($_GET['key'] ?? ''));
+        if (!$key || !hash_equals($this->get_access_key(), $key)) {
+            status_header(403);
+            return '<div class="ldc-access-error"><h1>Private company settings</h1><p>This link is incomplete or no longer valid.</p></div>';
+        }
+        $this->load_assets();
+        ob_start();
+        $this->render_public_company_settings();
+        return (string) ob_get_clean();
+    }
+
     public function serve_standalone_page(): void {
         $is_builder = is_page(self::PAGE_SLUG);
         $is_list = is_page(self::LIST_PAGE_SLUG);
-        if (!$is_builder && !$is_list) { return; }
+        $is_settings = is_page(self::SETTINGS_PAGE_SLUG);
+        if (!$is_builder && !$is_list && !$is_settings) { return; }
         $key = sanitize_text_field(wp_unslash($_GET['key'] ?? ''));
         $valid = $key && hash_equals($this->get_access_key(), $key);
         if (!$valid) { status_header(403); } else { $this->load_assets(); }
@@ -235,7 +254,9 @@ final class LDC_Invoice_Generator {
             <?php wp_head(); ?>
         </head><body class="ldc-standalone-page"><?php
         if ($valid) {
-            $is_list ? $this->render_invoice_list(true) : $this->render_builder(true);
+            if ($is_settings) { $this->render_public_company_settings(); }
+            elseif ($is_list) { $this->render_invoice_list(true); }
+            else { $this->render_builder(true); }
         } else {
             echo '<div class="ldc-access-error"><h1>Private invoice builder</h1><p>This link is incomplete or no longer valid. Request a new private link from the site administrator.</p></div>';
         }
@@ -246,19 +267,14 @@ final class LDC_Invoice_Generator {
 
     private function render_builder(bool $frontend): void {
         $list_url = add_query_arg('key', rawurlencode($this->get_access_key()), home_url('/' . self::LIST_PAGE_SLUG . '/'));
+        $settings_url = add_query_arg('key', rawurlencode($this->get_access_key()), home_url('/' . self::SETTINGS_PAGE_SLUG . '/'));
         $company = $this->get_company_settings();
         ?>
         <div class="<?php echo $frontend ? 'ldc-frontend ' : 'wrap '; ?>ldc-app" id="ldc-invoice-app">
             <div class="ldc-toolbar">
                 <div class="ldc-app-brand"><img src="<?php echo esc_url($this->get_logo_url()); ?>" alt="<?php echo esc_attr($company['company_name'] ?: 'Company logo'); ?>"><div><h1>Invoice Generator</h1><p>Fill in the fields, review the invoice, then save it as PDF or send it by email.</p></div></div>
-                <div class="ldc-toolbar-actions">
-                    <a class="button" href="<?php echo esc_url($list_url); ?>">Invoice list</a>
-                    <button type="button" class="button" id="ldc-new-invoice">New</button>
-                    <button type="button" class="button" id="ldc-save-draft">Save invoice</button>
-                    <button type="button" class="button" id="ldc-export-json">Export current</button>
-                    <button type="button" class="button button-primary" id="ldc-print">Print / PDF</button>
-                </div>
             </div>
+            <nav class="ldc-toolbar-actions ldc-sticky-actions" aria-label="Invoice actions"><a class="button" href="<?php echo esc_url($list_url); ?>">Invoice list</a><a class="button" href="<?php echo esc_url($settings_url); ?>">Company settings</a><button type="button" class="button" id="ldc-new-invoice">New</button><button type="button" class="button" id="ldc-save-draft">Save invoice</button><button type="button" class="button" id="ldc-export-json">Export current</button><button type="button" class="button button-primary" id="ldc-print">Print / PDF</button></nav>
             <div class="ldc-notice" id="ldc-notice" hidden></div>
             <div class="ldc-layout">
                 <form class="ldc-form" id="ldc-invoice-form" autocomplete="off">
@@ -322,18 +338,14 @@ final class LDC_Invoice_Generator {
 
     private function render_invoice_list(bool $frontend): void {
         $builder_url = add_query_arg('key', rawurlencode($this->get_access_key()), home_url('/' . self::PAGE_SLUG . '/'));
+        $settings_url = add_query_arg('key', rawurlencode($this->get_access_key()), home_url('/' . self::SETTINGS_PAGE_SLUG . '/'));
         $company = $this->get_company_settings();
         ?>
         <div class="<?php echo $frontend ? 'ldc-frontend ' : 'wrap '; ?>ldc-app" id="ldc-invoice-list-app">
             <div class="ldc-toolbar">
                 <div class="ldc-app-brand"><img src="<?php echo esc_url($this->get_logo_url()); ?>" alt="<?php echo esc_attr($company['company_name'] ?: 'Company logo'); ?>"><div><h1>Saved Invoices</h1><p>Open, export, import, or delete saved invoices.</p></div></div>
-                <div class="ldc-toolbar-actions">
-                    <a class="button button-primary" href="<?php echo esc_url($builder_url); ?>">Back to generator</a>
-                    <button type="button" class="button" id="ldc-list-export-all">Export all</button>
-                    <button type="button" class="button" id="ldc-list-import">Import JSON</button>
-                    <input type="file" id="ldc-list-import-file" accept="application/json,.json" hidden>
-                </div>
             </div>
+            <nav class="ldc-toolbar-actions ldc-sticky-actions" aria-label="Invoice archive actions"><a class="button button-primary" href="<?php echo esc_url($builder_url); ?>">Back to generator</a><a class="button" href="<?php echo esc_url($settings_url); ?>">Company settings</a><button type="button" class="button" id="ldc-list-export-all">Export all</button><button type="button" class="button" id="ldc-list-import">Import JSON</button><input type="file" id="ldc-list-import-file" accept="application/json,.json" hidden></nav>
             <div class="ldc-notice" id="ldc-list-notice" hidden></div>
             <section class="ldc-panel ldc-list-panel">
                 <div class="ldc-section-heading"><h2>Invoice archive</h2><span id="ldc-list-count">Loading...</span></div>
@@ -346,6 +358,35 @@ final class LDC_Invoice_Generator {
             </section>
         </div>
         <?php
+    }
+
+    private function render_public_company_settings(): void {
+        $company = $this->get_company_settings();
+        $builder_url = add_query_arg('key', rawurlencode($this->get_access_key()), home_url('/' . self::PAGE_SLUG . '/'));
+        $list_url = add_query_arg('key', rawurlencode($this->get_access_key()), home_url('/' . self::LIST_PAGE_SLUG . '/'));
+        ?>
+        <div class="ldc-frontend ldc-app" id="ldc-company-settings-app">
+            <div class="ldc-toolbar"><div class="ldc-app-brand"><img src="<?php echo esc_url($this->get_logo_url()); ?>" alt="<?php echo esc_attr($company['company_name'] ?: 'Company logo'); ?>"><div><h1>Company Settings</h1><p>These values are stored only in the WordPress database.</p></div></div></div>
+            <nav class="ldc-toolbar-actions ldc-sticky-actions" aria-label="Settings navigation"><a class="button button-primary" href="<?php echo esc_url($builder_url); ?>">Back to generator</a><a class="button" href="<?php echo esc_url($list_url); ?>">Invoice list</a><button type="button" class="button" id="ldc-company-save">Save settings</button></nav>
+            <div class="ldc-notice" id="ldc-company-notice" hidden></div>
+            <form class="ldc-panel ldc-company-form" id="ldc-company-form" autocomplete="off">
+                <h2>Company information</h2>
+                <div class="ldc-grid two">
+                    <?php $this->public_setting_field('company_name', 'Company name', $company['company_name']); ?>
+                    <?php $this->public_setting_field('license_number', 'License number', $company['license_number']); ?>
+                    <?php $this->public_setting_field('phone', 'Phone number', $company['phone']); ?>
+                    <?php $this->public_setting_field('default_tax_rate', 'Default sales tax rate (%)', $company['default_tax_rate'], 'number', '0.001'); ?>
+                </div>
+                <?php $this->public_setting_field('address_line_1', 'Address line 1', $company['address_line_1']); ?>
+                <?php $this->public_setting_field('address_line_2', 'Address line 2', $company['address_line_2']); ?>
+                <p class="ldc-settings-help"><strong>Logo:</strong> the generator uses the Site Logo configured in WordPress Appearance settings.</p>
+            </form>
+        </div>
+        <?php
+    }
+
+    private function public_setting_field(string $name, string $label, string $value, string $type = 'text', string $step = ''): void {
+        printf('<label class="ldc-field"><span>%1$s</span><input type="%2$s" name="%3$s" value="%4$s" %5$s></label>', esc_html($label), esc_attr($type), esc_attr($name), esc_attr($value), $step ? 'step="' . esc_attr($step) . '" min="0"' : '');
     }
 
     private function get_access_key(): string {
@@ -381,10 +422,20 @@ final class LDC_Invoice_Generator {
                 'comment_status' => 'closed',
             ]);
         }
+        if (!get_page_by_path(self::SETTINGS_PAGE_SLUG)) {
+            wp_insert_post([
+                'post_title' => 'Invoice Settings',
+                'post_name' => self::SETTINGS_PAGE_SLUG,
+                'post_content' => '[ldc_invoice_settings]',
+                'post_status' => 'publish',
+                'post_type' => 'page',
+                'comment_status' => 'closed',
+            ]);
+        }
     }
 
     public function ensure_pages(): void {
-        if (!get_page_by_path(self::PAGE_SLUG) || !get_page_by_path(self::LIST_PAGE_SLUG)) { self::activate(); }
+        if (!get_page_by_path(self::PAGE_SLUG) || !get_page_by_path(self::LIST_PAGE_SLUG) || !get_page_by_path(self::SETTINGS_PAGE_SLUG)) { self::activate(); }
     }
 
     private function field(string $name, string $label, string $placeholder = '', string $type = 'text', string $step = ''): void {
@@ -442,6 +493,20 @@ final class LDC_Invoice_Generator {
         }
 
         wp_send_json_error(['message' => 'Unknown operation.'], 400);
+    }
+
+    public function save_company_settings_public(): void {
+        $this->authorize_request();
+        $settings = [
+            'company_name' => sanitize_text_field(wp_unslash($_POST['company_name'] ?? '')),
+            'license_number' => sanitize_text_field(wp_unslash($_POST['license_number'] ?? '')),
+            'phone' => sanitize_text_field(wp_unslash($_POST['phone'] ?? '')),
+            'address_line_1' => sanitize_text_field(wp_unslash($_POST['address_line_1'] ?? '')),
+            'address_line_2' => sanitize_text_field(wp_unslash($_POST['address_line_2'] ?? '')),
+            'default_tax_rate' => (string) max(0, (float) wp_unslash($_POST['default_tax_rate'] ?? '0')),
+        ];
+        update_option(self::COMPANY_OPTION, $settings, false);
+        wp_send_json_success(['message' => 'Company settings saved.', 'settings' => $settings]);
     }
 
     public function send_invoice(): void {
