@@ -2,7 +2,7 @@
 /**
  * Plugin Name: LDC Invoice Generator
  * Description: Private invoice/proposal builder with saved records, printing/PDF, JSON transfer, and email delivery.
- * Version: 0.9.0
+ * Version: 0.9.1
  * Author: Xmods
  * Author URI: https://github.com/xmods97
  * Update URI: https://github.com/xmods97/ldc-invoice-generator-
@@ -56,10 +56,10 @@ final class LDC_Invoice_Generator {
 
     private function load_assets(): void {
         $base = plugin_dir_url(__FILE__);
-        wp_enqueue_style('ldc-invoice-admin', $base . 'assets/admin.css', [], '0.9.0');
-        wp_enqueue_script('ldc-invoice-admin', $base . 'assets/admin.js', [], '0.9.0', true);
-        wp_enqueue_script('ldc-invoice-list', $base . 'assets/list.js', [], '0.9.0', true);
-        wp_enqueue_script('ldc-invoice-settings', $base . 'assets/settings.js', [], '0.9.0', true);
+        wp_enqueue_style('ldc-invoice-admin', $base . 'assets/admin.css', [], '0.9.1');
+        wp_enqueue_script('ldc-invoice-admin', $base . 'assets/admin.js', [], '0.9.1', true);
+        wp_enqueue_script('ldc-invoice-list', $base . 'assets/list.js', [], '0.9.1', true);
+        wp_enqueue_script('ldc-invoice-settings', $base . 'assets/settings.js', [], '0.9.1', true);
         $company = $this->get_company_settings();
         wp_localize_script('ldc-invoice-admin', 'LDCInvoice', [
             'ajaxUrl' => admin_url('admin-ajax.php'),
@@ -336,7 +336,7 @@ final class LDC_Invoice_Generator {
             <div class="ldc-toolbar">
                 <div class="ldc-app-brand"><img src="<?php echo esc_url($this->get_logo_url()); ?>" alt="<?php echo esc_attr($company['company_name'] ?: 'Company logo'); ?>"><div><h1>Invoice Generator</h1><p>Fill in the fields, review the invoice, then save it as PDF or send it by email.</p><a class="ldc-plugin-credit" href="https://github.com/xmods97" target="_blank" rel="noopener">Plugin by Xmods</a></div></div>
             </div>
-            <nav class="ldc-toolbar-actions ldc-sticky-actions" aria-label="Invoice actions"><button type="button" class="button button-primary" id="ldc-print">Print / PDF</button><a class="button" href="<?php echo esc_url($list_url); ?>">Invoice list</a><a class="button" href="<?php echo esc_url($settings_url); ?>">Company settings</a><button type="button" class="button" id="ldc-new-invoice">New</button><button type="button" class="button" id="ldc-save-draft">Save invoice</button><button type="button" class="button" id="ldc-export-json">Export current</button><button type="button" class="button ldc-send-email-trigger">Send invoice by email</button></nav>
+            <nav class="ldc-toolbar-actions ldc-sticky-actions" aria-label="Invoice actions"><button type="button" class="button button-primary" id="ldc-print">Print / PDF</button><button type="button" class="button ldc-send-button ldc-send-email-trigger">Send invoice by email</button><a class="button" href="<?php echo esc_url($list_url); ?>">Invoice list</a><a class="button" href="<?php echo esc_url($settings_url); ?>">Company settings</a><button type="button" class="button" id="ldc-new-invoice">New</button><button type="button" class="button" id="ldc-save-draft">Save invoice</button><button type="button" class="button" id="ldc-export-json">Export current</button></nav>
             <div class="ldc-notice" id="ldc-notice" hidden></div>
             <div class="ldc-layout">
                 <form class="ldc-form" id="ldc-invoice-form" autocomplete="off">
@@ -386,13 +386,13 @@ final class LDC_Invoice_Generator {
                             <?php $this->field('email_cc', 'CC', '', 'email'); ?>
                         </div>
                         <?php $this->textarea('email_message', 'Message', "Hello,\n\nPlease find your project proposal and invoice below.\n\nThank you."); ?>
-                        <button type="button" class="button button-primary button-large ldc-send-email-trigger">Send invoice by email</button>
+                        <button type="button" class="button button-large ldc-send-button ldc-send-email-trigger">Send invoice by email</button>
                     </section>
                 </form>
                 <aside class="ldc-preview-column">
                     <div class="ldc-preview-label">Live preview</div>
                     <article class="ldc-paper" id="ldc-invoice-preview" aria-label="Invoice preview"></article>
-                    <div class="ldc-preview-actions"><button type="button" class="button button-primary ldc-send-email-trigger">Send invoice by email</button></div>
+                    <div class="ldc-preview-actions"><button type="button" class="button ldc-send-button ldc-send-email-trigger">Send invoice by email</button></div>
                 </aside>
             </div>
         </div>
