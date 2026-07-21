@@ -2,7 +2,7 @@
 /**
  * Plugin Name: LDC Invoice Generator
  * Description: Private invoice/proposal builder with saved records, printing/PDF, JSON transfer, and email delivery.
- * Version: 0.9.3
+ * Version: 0.9.4
  * Author: Xmods
  * Author URI: https://github.com/xmods97
  * Update URI: https://github.com/xmods97/ldc-invoice-generator-
@@ -61,10 +61,10 @@ final class LDC_Invoice_Generator {
 
     private function load_assets(): void {
         $base = plugin_dir_url(__FILE__);
-        wp_enqueue_style('ldc-invoice-admin', $base . 'assets/admin.css', [], '0.9.3');
-        wp_enqueue_script('ldc-invoice-admin', $base . 'assets/admin.js', [], '0.9.3', true);
-        wp_enqueue_script('ldc-invoice-list', $base . 'assets/list.js', [], '0.9.3', true);
-        wp_enqueue_script('ldc-invoice-settings', $base . 'assets/settings.js', [], '0.9.3', true);
+        wp_enqueue_style('ldc-invoice-admin', $base . 'assets/admin.css', [], '0.9.4');
+        wp_enqueue_script('ldc-invoice-admin', $base . 'assets/admin.js', [], '0.9.4', true);
+        wp_enqueue_script('ldc-invoice-list', $base . 'assets/list.js', [], '0.9.4', true);
+        wp_enqueue_script('ldc-invoice-settings', $base . 'assets/settings.js', [], '0.9.4', true);
         $company = $this->get_company_settings();
         wp_localize_script('ldc-invoice-admin', 'LDCInvoice', [
             'ajaxUrl' => admin_url('admin-ajax.php'),
