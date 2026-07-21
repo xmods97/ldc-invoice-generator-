@@ -2,7 +2,7 @@
 /**
  * Plugin Name: LDC Invoice Generator
  * Description: Private invoice/proposal builder with saved records, printing/PDF, JSON transfer, and email delivery.
- * Version: 0.9.14
+ * Version: 0.9.15
  * Author: Xmods
  * Author URI: https://github.com/xmods97
  * Update URI: https://github.com/xmods97/ldc-invoice-generator-
@@ -11,6 +11,7 @@
 if (!defined('ABSPATH')) { exit; }
 
 final class LDC_Invoice_Generator {
+    private const VERSION = '0.9.15';
     private const SLUG = 'ldc-invoice-generator';
     private const PAGE_SLUG = 'invoice-builder';
     private const LIST_PAGE_SLUG = 'invoice-list';
@@ -61,16 +62,19 @@ final class LDC_Invoice_Generator {
 
     private function load_assets(): void {
         $base = plugin_dir_url(__FILE__);
-        wp_enqueue_style('ldc-invoice-admin', $base . 'assets/admin.css', [], '0.9.14');
-        wp_enqueue_script('ldc-invoice-admin', $base . 'assets/admin.js', [], '0.9.14', true);
-        wp_enqueue_script('ldc-invoice-list', $base . 'assets/list.js', [], '0.9.14', true);
-        wp_enqueue_script('ldc-invoice-settings', $base . 'assets/settings.js', [], '0.9.14', true);
+        wp_enqueue_style('ldc-invoice-admin', $base . 'assets/admin.css', [], self::VERSION);
+        wp_enqueue_script('ldc-pdfmake', $base . 'assets/vendor/pdfmake.min.js', [], '0.2.20', true);
+        wp_enqueue_script('ldc-pdfmake-fonts', $base . 'assets/vendor/vfs_fonts.js', ['ldc-pdfmake'], '0.2.20', true);
+        wp_enqueue_script('ldc-invoice-admin', $base . 'assets/admin.js', ['ldc-pdfmake-fonts'], self::VERSION . '.1', true);
+        wp_enqueue_script('ldc-invoice-list', $base . 'assets/list.js', [], self::VERSION, true);
+        wp_enqueue_script('ldc-invoice-settings', $base . 'assets/settings.js', [], self::VERSION, true);
         $company = $this->get_company_settings();
         wp_localize_script('ldc-invoice-admin', 'LDCInvoice', [
             'ajaxUrl' => admin_url('admin-ajax.php'),
             'nonce' => wp_create_nonce('ldc_invoice_send'),
             'accessKey' => $this->get_access_key(),
             'logoUrl' => $this->get_logo_url(),
+            'version' => self::VERSION,
             'builderUrl' => add_query_arg('key', rawurlencode($this->get_access_key()), home_url('/' . self::PAGE_SLUG . '/')),
             'listUrl' => add_query_arg('key', rawurlencode($this->get_access_key()), home_url('/' . self::LIST_PAGE_SLUG . '/')),
             'settingsUrl' => add_query_arg('key', rawurlencode($this->get_access_key()), home_url('/' . self::SETTINGS_PAGE_SLUG . '/')),
@@ -394,7 +398,7 @@ final class LDC_Invoice_Generator {
         ?>
         <div class="<?php echo $frontend ? 'ldc-frontend ' : 'wrap '; ?>ldc-app" id="ldc-invoice-app">
             <div class="ldc-toolbar">
-                <div class="ldc-app-brand"><img src="<?php echo esc_url($this->get_logo_url()); ?>" alt="<?php echo esc_attr($company['company_name'] ?: 'Company logo'); ?>"><div><h1>Invoice Generator</h1><p>Fill in the fields, review the invoice, then save it as PDF or send it by email.</p><a class="ldc-plugin-credit" href="https://github.com/xmods97" target="_blank" rel="noopener">Plugin by Xmods</a></div></div>
+                <div class="ldc-app-brand"><img src="<?php echo esc_url($this->get_logo_url()); ?>" alt="<?php echo esc_attr($company['company_name'] ?: 'Company logo'); ?>"><div><h1>Invoice Generator</h1><p>Fill in the fields, review the invoice, then save it as PDF or send it by email.</p><a class="ldc-plugin-credit" href="https://github.com/xmods97" target="_blank" rel="noopener">Plugin by Xmods · v<?php echo esc_html(self::VERSION); ?></a></div></div>
             </div>
             <nav class="ldc-toolbar-actions ldc-sticky-actions" aria-label="Invoice actions"><button type="button" class="button button-primary" id="ldc-print">Print / PDF</button><button type="button" class="button ldc-send-button ldc-send-email-trigger">Send invoice by email</button><a class="button" href="<?php echo esc_url($list_url); ?>">Invoice list</a><a class="button" href="<?php echo esc_url($settings_url); ?>">Company settings</a><button type="button" class="button" id="ldc-new-invoice">New</button><button type="button" class="button" id="ldc-save-draft">Save invoice</button><button type="button" class="button" id="ldc-export-json">Export current</button></nav>
             <div class="ldc-notice" id="ldc-notice" hidden></div>
@@ -466,7 +470,7 @@ final class LDC_Invoice_Generator {
         ?>
         <div class="<?php echo $frontend ? 'ldc-frontend ' : 'wrap '; ?>ldc-app" id="ldc-invoice-list-app">
             <div class="ldc-toolbar">
-                <div class="ldc-app-brand"><img src="<?php echo esc_url($this->get_logo_url()); ?>" alt="<?php echo esc_attr($company['company_name'] ?: 'Company logo'); ?>"><div><h1>Saved Invoices</h1><p>Open, export, import, or delete saved invoices.</p><a class="ldc-plugin-credit" href="https://github.com/xmods97" target="_blank" rel="noopener">Plugin by Xmods</a></div></div>
+                <div class="ldc-app-brand"><img src="<?php echo esc_url($this->get_logo_url()); ?>" alt="<?php echo esc_attr($company['company_name'] ?: 'Company logo'); ?>"><div><h1>Saved Invoices</h1><p>Open, export, import, or delete saved invoices.</p><a class="ldc-plugin-credit" href="https://github.com/xmods97" target="_blank" rel="noopener">Plugin by Xmods · v<?php echo esc_html(self::VERSION); ?></a></div></div>
             </div>
             <nav class="ldc-toolbar-actions ldc-sticky-actions" aria-label="Invoice archive actions"><a class="button button-primary" href="<?php echo esc_url($builder_url); ?>">Back to generator</a><a class="button" href="<?php echo esc_url($settings_url); ?>">Company settings</a><button type="button" class="button" id="ldc-list-export-all">Export all</button><button type="button" class="button" id="ldc-list-import">Import JSON</button><input type="file" id="ldc-list-import-file" accept="application/json,.json" hidden></nav>
             <div class="ldc-notice" id="ldc-list-notice" hidden></div>
@@ -489,7 +493,7 @@ final class LDC_Invoice_Generator {
         $list_url = add_query_arg('key', rawurlencode($this->get_access_key()), home_url('/' . self::LIST_PAGE_SLUG . '/'));
         ?>
         <div class="ldc-frontend ldc-app" id="ldc-company-settings-app">
-            <div class="ldc-toolbar"><div class="ldc-app-brand"><img src="<?php echo esc_url($this->get_logo_url()); ?>" alt="<?php echo esc_attr($company['company_name'] ?: 'Company logo'); ?>"><div><h1>Company Settings</h1><p>These values are stored only in the WordPress database.</p><a class="ldc-plugin-credit" href="https://github.com/xmods97" target="_blank" rel="noopener">Plugin by Xmods</a></div></div></div>
+            <div class="ldc-toolbar"><div class="ldc-app-brand"><img src="<?php echo esc_url($this->get_logo_url()); ?>" alt="<?php echo esc_attr($company['company_name'] ?: 'Company logo'); ?>"><div><h1>Company Settings</h1><p>These values are stored only in the WordPress database.</p><a class="ldc-plugin-credit" href="https://github.com/xmods97" target="_blank" rel="noopener">Plugin by Xmods · v<?php echo esc_html(self::VERSION); ?></a></div></div></div>
             <nav class="ldc-toolbar-actions ldc-sticky-actions" aria-label="Settings navigation"><a class="button button-primary" href="<?php echo esc_url($builder_url); ?>">Back to generator</a><a class="button" href="<?php echo esc_url($list_url); ?>">Invoice list</a><button type="button" class="button" id="ldc-company-save">Save settings</button></nav>
             <div class="ldc-notice" id="ldc-company-notice" hidden></div>
             <form class="ldc-panel ldc-company-form" id="ldc-company-form" autocomplete="off">
@@ -648,6 +652,8 @@ final class LDC_Invoice_Generator {
         $subject = sanitize_text_field(wp_unslash($_POST['subject'] ?? 'Invoice'));
         $message = sanitize_textarea_field(wp_unslash($_POST['message'] ?? ''));
         $invoice = wp_kses_post(wp_unslash($_POST['invoice_html'] ?? ''));
+        $pdf_data = (string) wp_unslash($_POST['pdf_data'] ?? '');
+        $pdf_filename = sanitize_file_name(wp_unslash($_POST['pdf_filename'] ?? 'invoice.pdf'));
         if (!$recipient || !is_email($recipient)) { wp_send_json_error(['message' => 'Enter a valid client email address.'], 422); }
         if ($invoice === '') { wp_send_json_error(['message' => 'Invoice content is empty.'], 422); }
         $headers = ['Content-Type: text/html; charset=UTF-8'];
@@ -659,7 +665,17 @@ final class LDC_Invoice_Generator {
             . '.ldc-scope-entry{position:relative}.ldc-scope-entry-price{position:absolute;left:calc(100% + 45px);top:24px;width:58px;font:italic 16px Georgia,serif;white-space:nowrap}'
             . '</style>';
         $body = $email_css . '<div style="font:16px/1.6 Arial,sans-serif;color:#202124;max-width:760px;margin:auto">' . wpautop(esc_html($message)) . '<hr style="border:0;border-top:1px solid #d7dce2;margin:28px 0">' . $invoice . '</div>';
-        if (!wp_mail($recipient, $subject, $body, $headers)) { wp_send_json_error(['message' => 'WordPress could not send the email. Check FluentSMTP logs.'], 500); }
+        if (!preg_match('#^data:application/pdf;base64,#', $pdf_data)) { wp_send_json_error(['message' => 'PDF attachment could not be generated. Please try again.'], 422); }
+        $pdf_binary = base64_decode(substr($pdf_data, strpos($pdf_data, ',') + 1), true);
+        if ($pdf_binary === false || strncmp($pdf_binary, '%PDF', 4) !== 0) { wp_send_json_error(['message' => 'Generated PDF attachment is invalid.'], 422); }
+        $upload = wp_upload_dir();
+        $attachment_dir = trailingslashit($upload['basedir']) . 'ldc-invoice-attachments';
+        if (!wp_mkdir_p($attachment_dir)) { wp_send_json_error(['message' => 'Could not prepare the PDF attachment folder.'], 500); }
+        $attachment_path = trailingslashit($attachment_dir) . ($pdf_filename ?: 'invoice.pdf');
+        if (file_put_contents($attachment_path, $pdf_binary) === false) { wp_send_json_error(['message' => 'Could not save the PDF attachment.'], 500); }
+        $sent = wp_mail($recipient, $subject, $body, $headers, [$attachment_path]);
+        @unlink($attachment_path);
+        if (!$sent) { wp_send_json_error(['message' => 'WordPress could not send the email. Check FluentSMTP logs.'], 500); }
         set_transient($rate_key, $rate + 1, HOUR_IN_SECONDS);
         wp_send_json_success(['message' => 'Invoice sent to ' . $recipient . '.']);
     }
