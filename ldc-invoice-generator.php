@@ -2,7 +2,7 @@
 /**
  * Plugin Name: LDC Invoice Generator
  * Description: Private invoice/proposal builder with saved records, printing/PDF, JSON transfer, and email delivery.
- * Version: 0.9.5
+ * Version: 0.9.6
  * Author: Xmods
  * Author URI: https://github.com/xmods97
  * Update URI: https://github.com/xmods97/ldc-invoice-generator-
@@ -11,7 +11,7 @@
 if (!defined('ABSPATH')) { exit; }
 
 final class LDC_Invoice_Generator {
-    private const VERSION = '0.9.5';
+    private const VERSION = '0.9.6';
     private const SLUG = 'ldc-invoice-generator';
     private const PAGE_SLUG = 'invoice-builder';
     private const LIST_PAGE_SLUG = 'invoice-list';
@@ -655,11 +655,16 @@ final class LDC_Invoice_Generator {
         if (!$recipient || !is_email($recipient)) { wp_send_json_error(['message' => 'Enter a valid client email address.'], 422); }
         if ($invoice === '') { wp_send_json_error(['message' => 'Invoice content is empty.'], 422); }
         if ($pdf_data === '') { wp_send_json_error(['message' => 'PDF attachment is missing. Please try again.'], 422); }
-        if (strpos($pdf_data, 'data:application/pdf;base64,') === 0) {
-            $pdf_data = substr($pdf_data, strlen('data:application/pdf;base64,'));
+        if (strpos($pdf_data, 'data:') === 0) {
+            $comma_pos = strpos($pdf_data, ',');
+            if ($comma_pos === false || stripos(substr($pdf_data, 0, $comma_pos), 'base64') === false) {
+                wp_send_json_error(['message' => 'PDF attachment could not be generated. Please try again.'], 422);
+            }
+            $pdf_data = substr($pdf_data, $comma_pos + 1);
         }
+        $pdf_data = preg_replace('/\s+/', '', $pdf_data);
         $pdf_binary = base64_decode($pdf_data, true);
-        if (!$pdf_binary || strncmp($pdf_binary, '%PDF', 4) !== 0) {
+        if (!$pdf_binary || strpos(substr($pdf_binary, 0, 1024), '%PDF') === false) {
             wp_send_json_error(['message' => 'PDF attachment could not be generated. Please try again.'], 422);
         }
         if (strlen($pdf_binary) > 12000000) {
