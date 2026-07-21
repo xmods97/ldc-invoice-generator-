@@ -2,7 +2,7 @@
 /**
  * Plugin Name: LDC Invoice Generator
  * Description: Private invoice/proposal builder with saved records, printing/PDF, JSON transfer, and email delivery.
- * Version: 0.9.12
+ * Version: 0.9.13
  * Author: Xmods
  * Author URI: https://github.com/xmods97
  * Update URI: https://github.com/xmods97/ldc-invoice-generator-
@@ -11,7 +11,7 @@
 if (!defined('ABSPATH')) { exit; }
 
 final class LDC_Invoice_Generator {
-    private const VERSION = '0.9.12';
+    private const VERSION = '0.9.13';
     private const SLUG = 'ldc-invoice-generator';
     private const PAGE_SLUG = 'invoice-builder';
     private const LIST_PAGE_SLUG = 'invoice-list';
