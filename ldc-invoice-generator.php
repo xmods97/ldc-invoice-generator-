@@ -2,7 +2,7 @@
 /**
  * Plugin Name: LDC Invoice Generator
  * Description: Private invoice/proposal builder with saved records, printing/PDF, JSON transfer, and email delivery.
- * Version: 0.9.1
+ * Version: 0.9.2
  * Author: Xmods
  * Author URI: https://github.com/xmods97
  * Update URI: https://github.com/xmods97/ldc-invoice-generator-
@@ -42,6 +42,8 @@ final class LDC_Invoice_Generator {
         add_filter('update_plugins_github.com', [$this, 'check_github_update'], 10, 4);
         add_filter('plugins_api', [$this, 'github_plugin_information'], 20, 3);
         add_filter('auto_update_plugin', [$this, 'allow_automatic_updates'], 10, 2);
+        add_filter('plugin_auto_update_setting_html', [$this, 'automatic_update_setting_html'], 10, 3);
+        add_action('admin_post_ldc_toggle_auto_updates', [$this, 'toggle_automatic_updates']);
     }
 
     public function register_menu(): void {
@@ -56,10 +58,10 @@ final class LDC_Invoice_Generator {
 
     private function load_assets(): void {
         $base = plugin_dir_url(__FILE__);
-        wp_enqueue_style('ldc-invoice-admin', $base . 'assets/admin.css', [], '0.9.1');
-        wp_enqueue_script('ldc-invoice-admin', $base . 'assets/admin.js', [], '0.9.1', true);
-        wp_enqueue_script('ldc-invoice-list', $base . 'assets/list.js', [], '0.9.1', true);
-        wp_enqueue_script('ldc-invoice-settings', $base . 'assets/settings.js', [], '0.9.1', true);
+        wp_enqueue_style('ldc-invoice-admin', $base . 'assets/admin.css', [], '0.9.2');
+        wp_enqueue_script('ldc-invoice-admin', $base . 'assets/admin.js', [], '0.9.2', true);
+        wp_enqueue_script('ldc-invoice-list', $base . 'assets/list.js', [], '0.9.2', true);
+        wp_enqueue_script('ldc-invoice-settings', $base . 'assets/settings.js', [], '0.9.2', true);
         $company = $this->get_company_settings();
         wp_localize_script('ldc-invoice-admin', 'LDCInvoice', [
             'ajaxUrl' => admin_url('admin-ajax.php'),
@@ -251,6 +253,26 @@ final class LDC_Invoice_Generator {
             return (bool) get_option(self::AUTO_UPDATE_OPTION, false);
         }
         return $update;
+    }
+
+    public function automatic_update_setting_html($html, $plugin_file, $plugin_data) {
+        if ($plugin_file !== plugin_basename(__FILE__)) { return $html; }
+        $enabled = (bool) get_option(self::AUTO_UPDATE_OPTION, false);
+        $url = wp_nonce_url(
+            admin_url('admin-post.php?action=ldc_toggle_auto_updates&enabled=' . ($enabled ? '0' : '1')),
+            'ldc_toggle_auto_updates'
+        );
+        $label = $enabled ? 'Disable automatic updates' : 'Enable automatic updates';
+        $status = $enabled ? 'Automatic updates enabled.' : 'Automatic updates disabled.';
+        return '<span class="ldc-auto-update-status">' . esc_html($status) . '</span><br><a href="' . esc_url($url) . '">' . esc_html($label) . '</a>';
+    }
+
+    public function toggle_automatic_updates(): void {
+        if (!current_user_can('update_plugins')) { wp_die('You are not allowed to change plugin update settings.'); }
+        check_admin_referer('ldc_toggle_auto_updates');
+        update_option(self::AUTO_UPDATE_OPTION, !empty($_GET['enabled']), false);
+        wp_safe_redirect(admin_url('plugins.php'));
+        exit;
     }
 
     public function render_page(): void {
