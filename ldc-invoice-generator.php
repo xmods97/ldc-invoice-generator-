@@ -1,0 +1,475 @@
+<?php
+/**
+ * Plugin Name: LDC Invoice Generator
+ * Description: Private invoice/proposal builder with saved records, printing/PDF, JSON transfer, and email delivery.
+ * Version: 0.7.0
+ * Author: Invoice Builder
+ * Update URI: https://github.com/xmods97/ldc-invoice-generator-
+ */
+
+if (!defined('ABSPATH')) { exit; }
+
+final class LDC_Invoice_Generator {
+    private const SLUG = 'ldc-invoice-generator';
+    private const PAGE_SLUG = 'invoice-builder';
+    private const LIST_PAGE_SLUG = 'invoice-list';
+    private const KEY_OPTION = 'ldc_invoice_access_key';
+    private const RECORDS_OPTION = 'ldc_invoice_records';
+    private const COMPANY_OPTION = 'ldc_invoice_company_settings';
+    private const UPDATE_API = 'https://api.github.com/repos/xmods97/ldc-invoice-generator-/releases/latest';
+    private const UPDATE_REPO = 'https://github.com/xmods97/ldc-invoice-generator-';
+    private const UPDATE_ASSET = 'ldc-invoice-generator.zip';
+
+    public function __construct() {
+        add_action('admin_menu', [$this, 'register_menu']);
+        add_action('admin_enqueue_scripts', [$this, 'enqueue_assets']);
+        add_shortcode('ldc_invoice_builder', [$this, 'render_frontend']);
+        add_shortcode('ldc_invoice_list', [$this, 'render_list_frontend']);
+        add_action('init', [$this, 'ensure_pages']);
+        add_action('template_redirect', [$this, 'serve_standalone_page']);
+        add_action('wp_ajax_ldc_send_invoice', [$this, 'send_invoice']);
+        add_action('wp_ajax_nopriv_ldc_send_invoice', [$this, 'send_invoice']);
+        foreach (['ldc_list_invoices', 'ldc_save_invoice', 'ldc_delete_invoice'] as $action) {
+            add_action('wp_ajax_' . $action, [$this, 'manage_invoices']);
+            add_action('wp_ajax_nopriv_' . $action, [$this, 'manage_invoices']);
+        }
+        add_filter('update_plugins_github.com', [$this, 'check_github_update'], 10, 4);
+        add_filter('plugins_api', [$this, 'github_plugin_information'], 20, 3);
+    }
+
+    public function register_menu(): void {
+        add_menu_page('Invoice Generator', 'Invoices', 'manage_options', self::SLUG, [$this, 'render_page'], 'dashicons-media-document', 26);
+        add_submenu_page(self::SLUG, 'Company Settings', 'Company Settings', 'manage_options', self::SLUG . '-settings', [$this, 'render_settings_page']);
+    }
+
+    public function enqueue_assets(string $hook): void {
+        if ($hook !== 'toplevel_page_' . self::SLUG) { return; }
+        $this->load_assets();
+    }
+
+    private function load_assets(): void {
+        $base = plugin_dir_url(__FILE__);
+        wp_enqueue_style('ldc-invoice-admin', $base . 'assets/admin.css', [], '0.7.0');
+        wp_enqueue_script('ldc-invoice-admin', $base . 'assets/admin.js', [], '0.7.0', true);
+        wp_enqueue_script('ldc-invoice-list', $base . 'assets/list.js', [], '0.7.0', true);
+        $company = $this->get_company_settings();
+        wp_localize_script('ldc-invoice-admin', 'LDCInvoice', [
+            'ajaxUrl' => admin_url('admin-ajax.php'),
+            'nonce' => wp_create_nonce('ldc_invoice_send'),
+            'accessKey' => $this->get_access_key(),
+            'logoUrl' => $this->get_logo_url(),
+            'builderUrl' => add_query_arg('key', rawurlencode($this->get_access_key()), home_url('/' . self::PAGE_SLUG . '/')),
+            'listUrl' => add_query_arg('key', rawurlencode($this->get_access_key()), home_url('/' . self::LIST_PAGE_SLUG . '/')),
+            'company' => $company,
+        ]);
+    }
+
+    private function get_company_settings(): array {
+        $saved = get_option(self::COMPANY_OPTION, []);
+        return wp_parse_args(is_array($saved) ? $saved : [], [
+            'company_name' => '',
+            'license_number' => '',
+            'phone' => '',
+            'address_line_1' => '',
+            'address_line_2' => '',
+            'default_tax_rate' => '0',
+        ]);
+    }
+
+    public function render_settings_page(): void {
+        if (!current_user_can('manage_options')) { return; }
+        if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ldc_company_nonce'])) {
+            check_admin_referer('ldc_save_company', 'ldc_company_nonce');
+            $settings = [
+                'company_name' => sanitize_text_field(wp_unslash($_POST['company_name'] ?? '')),
+                'license_number' => sanitize_text_field(wp_unslash($_POST['license_number'] ?? '')),
+                'phone' => sanitize_text_field(wp_unslash($_POST['phone'] ?? '')),
+                'address_line_1' => sanitize_text_field(wp_unslash($_POST['address_line_1'] ?? '')),
+                'address_line_2' => sanitize_text_field(wp_unslash($_POST['address_line_2'] ?? '')),
+                'default_tax_rate' => (string) max(0, (float) wp_unslash($_POST['default_tax_rate'] ?? '0')),
+            ];
+            update_option(self::COMPANY_OPTION, $settings, false);
+            echo '<div class="notice notice-success"><p>Company settings saved.</p></div>';
+        }
+        $settings = $this->get_company_settings();
+        ?><div class="wrap"><h1>Invoice Company Settings</h1><p>These values are stored only in this WordPress database and are not part of the plugin files or update package.</p><form method="post"><?php wp_nonce_field('ldc_save_company', 'ldc_company_nonce'); ?><table class="form-table" role="presentation"><tbody><?php
+        $fields = [
+            'company_name' => 'Company name',
+            'license_number' => 'License number',
+            'phone' => 'Phone number',
+            'address_line_1' => 'Address line 1',
+            'address_line_2' => 'Address line 2',
+            'default_tax_rate' => 'Default sales tax rate (%)',
+        ];
+        foreach ($fields as $name => $label) {
+            $type = $name === 'default_tax_rate' ? 'number' : 'text';
+            $step = $type === 'number' ? ' step="0.001" min="0"' : '';
+            echo '<tr><th scope="row"><label for="' . esc_attr($name) . '">' . esc_html($label) . '</label></th><td><input class="regular-text" id="' . esc_attr($name) . '" name="' . esc_attr($name) . '" type="' . esc_attr($type) . '" value="' . esc_attr($settings[$name]) . '"' . $step . '></td></tr>';
+        }
+        ?></tbody></table><p><strong>Logo:</strong> the plugin uses the Site Logo configured under Appearance → Customize / Site Editor.</p><?php submit_button('Save company settings'); ?></form></div><?php
+    }
+
+    private function get_logo_url(): string {
+        $custom_logo_id = (int) get_theme_mod('custom_logo');
+        if ($custom_logo_id) {
+            $logo = wp_get_attachment_image_url($custom_logo_id, 'full');
+            if ($logo) { return $logo; }
+        }
+        $site_icon = get_site_icon_url(512);
+        return $site_icon ?: includes_url('images/w-logo-blue-white-bg.png');
+    }
+
+    private function get_latest_release(): ?array {
+        $cache_key = 'ldc_invoice_github_release';
+        $cached = get_site_transient($cache_key);
+        if (is_array($cached)) { return $cached; }
+        $response = wp_remote_get(self::UPDATE_API, [
+            'timeout' => 12,
+            'headers' => ['Accept' => 'application/vnd.github+json'],
+            'user-agent' => 'WordPress/LDC-Invoice-Generator',
+        ]);
+        if (is_wp_error($response) || wp_remote_retrieve_response_code($response) !== 200) { return null; }
+        $release = json_decode(wp_remote_retrieve_body($response), true);
+        if (!is_array($release) || empty($release['tag_name'])) { return null; }
+        $package = '';
+        foreach ((array) ($release['assets'] ?? []) as $asset) {
+            if (($asset['name'] ?? '') === self::UPDATE_ASSET) {
+                $package = esc_url_raw((string) ($asset['browser_download_url'] ?? ''));
+                break;
+            }
+        }
+        if (!$package) { return null; }
+        $data = [
+            'version' => ltrim((string) $release['tag_name'], 'vV'),
+            'package' => $package,
+            'url' => esc_url_raw((string) ($release['html_url'] ?? self::UPDATE_REPO)),
+            'body' => sanitize_textarea_field((string) ($release['body'] ?? '')),
+            'published_at' => sanitize_text_field((string) ($release['published_at'] ?? '')),
+        ];
+        set_site_transient($cache_key, $data, 6 * HOUR_IN_SECONDS);
+        return $data;
+    }
+
+    public function check_github_update($update, array $plugin_data, string $plugin_file, array $locales) {
+        if ($plugin_file !== plugin_basename(__FILE__)) { return $update; }
+        $release = $this->get_latest_release();
+        if (!$release || version_compare((string) $plugin_data['Version'], $release['version'], '>=')) { return false; }
+        return [
+            'id' => self::UPDATE_REPO,
+            'slug' => self::SLUG,
+            'version' => $release['version'],
+            'url' => $release['url'],
+            'package' => $release['package'],
+            'tested' => get_bloginfo('version'),
+            'requires_php' => '7.4',
+            'icons' => [],
+            'banners' => [],
+        ];
+    }
+
+    public function github_plugin_information($result, string $action, $args) {
+        if ($action !== 'plugin_information' || empty($args->slug) || $args->slug !== self::SLUG) { return $result; }
+        $release = $this->get_latest_release();
+        if (!$release) { return $result; }
+        return (object) [
+            'name' => 'Invoice Generator',
+            'slug' => self::SLUG,
+            'version' => $release['version'],
+            'author' => '<a href="' . esc_url(self::UPDATE_REPO) . '">Invoice Builder</a>',
+            'homepage' => self::UPDATE_REPO,
+            'download_link' => $release['package'],
+            'requires_php' => '7.4',
+            'last_updated' => $release['published_at'],
+            'sections' => [
+                'description' => 'Private invoice and project proposal builder with PDF printing, saved records, import/export, email delivery, and configurable company settings.',
+                'changelog' => nl2br(esc_html($release['body'] ?: 'See the GitHub release for details.')),
+            ],
+        ];
+    }
+
+    public function render_page(): void {
+        if (!current_user_can('manage_options')) { return; }
+        $page = get_page_by_path(self::PAGE_SLUG);
+        $url = add_query_arg('key', rawurlencode($this->get_access_key()), $page ? get_permalink($page) : home_url('/' . self::PAGE_SLUG . '/'));
+        echo '<div class="notice notice-info"><p><strong>Private client link:</strong> <a href="' . esc_url($url) . '" target="_blank" rel="noopener">' . esc_html($url) . '</a></p></div>';
+        $this->render_builder(false);
+    }
+
+    public function render_frontend(): string {
+        $key = sanitize_text_field(wp_unslash($_GET['key'] ?? ''));
+        if (!$key || !hash_equals($this->get_access_key(), $key)) {
+            status_header(403);
+            return '<div class="ldc-access-error"><h1>Private invoice builder</h1><p>This link is incomplete or no longer valid. Request a new private link from the site administrator.</p></div>';
+        }
+        $this->load_assets();
+        ob_start();
+        $this->render_builder(true);
+        return (string) ob_get_clean();
+    }
+
+    public function render_list_frontend(): string {
+        $key = sanitize_text_field(wp_unslash($_GET['key'] ?? ''));
+        if (!$key || !hash_equals($this->get_access_key(), $key)) {
+            status_header(403);
+            return '<div class="ldc-access-error"><h1>Private invoice archive</h1><p>This link is incomplete or no longer valid.</p></div>';
+        }
+        $this->load_assets();
+        ob_start();
+        $this->render_invoice_list(true);
+        return (string) ob_get_clean();
+    }
+
+    public function serve_standalone_page(): void {
+        $is_builder = is_page(self::PAGE_SLUG);
+        $is_list = is_page(self::LIST_PAGE_SLUG);
+        if (!$is_builder && !$is_list) { return; }
+        $key = sanitize_text_field(wp_unslash($_GET['key'] ?? ''));
+        $valid = $key && hash_equals($this->get_access_key(), $key);
+        if (!$valid) { status_header(403); } else { $this->load_assets(); }
+        nocache_headers();
+        ?><!doctype html><html <?php language_attributes(); ?>><head>
+            <meta charset="<?php bloginfo('charset'); ?>">
+            <meta name="viewport" content="width=device-width,initial-scale=1">
+            <meta name="robots" content="noindex,nofollow,noarchive">
+            <title>Private Invoice Builder</title>
+            <?php wp_head(); ?>
+        </head><body class="ldc-standalone-page"><?php
+        if ($valid) {
+            $is_list ? $this->render_invoice_list(true) : $this->render_builder(true);
+        } else {
+            echo '<div class="ldc-access-error"><h1>Private invoice builder</h1><p>This link is incomplete or no longer valid. Request a new private link from the site administrator.</p></div>';
+        }
+        wp_footer();
+        ?></body></html><?php
+        exit;
+    }
+
+    private function render_builder(bool $frontend): void {
+        $list_url = add_query_arg('key', rawurlencode($this->get_access_key()), home_url('/' . self::LIST_PAGE_SLUG . '/'));
+        $company = $this->get_company_settings();
+        ?>
+        <div class="<?php echo $frontend ? 'ldc-frontend ' : 'wrap '; ?>ldc-app" id="ldc-invoice-app">
+            <div class="ldc-toolbar">
+                <div class="ldc-app-brand"><img src="<?php echo esc_url($this->get_logo_url()); ?>" alt="<?php echo esc_attr($company['company_name'] ?: 'Company logo'); ?>"><div><h1>Invoice Generator</h1><p>Fill in the fields, review the invoice, then save it as PDF or send it by email.</p></div></div>
+                <div class="ldc-toolbar-actions">
+                    <a class="button" href="<?php echo esc_url($list_url); ?>">Invoice list</a>
+                    <button type="button" class="button" id="ldc-new-invoice">New</button>
+                    <button type="button" class="button" id="ldc-save-draft">Save invoice</button>
+                    <button type="button" class="button" id="ldc-export-json">Export current</button>
+                    <button type="button" class="button button-primary" id="ldc-print">Print / PDF</button>
+                </div>
+            </div>
+            <div class="ldc-notice" id="ldc-notice" hidden></div>
+            <div class="ldc-layout">
+                <form class="ldc-form" id="ldc-invoice-form" autocomplete="off">
+                    <section class="ldc-panel">
+                        <h2>Invoice details</h2>
+                        <div class="ldc-grid two">
+                            <?php $this->field('invoice_number', 'Invoice number', 'INV-2026-001'); ?>
+                            <?php $this->field('invoice_date', 'Invoice date', '', 'date'); ?>
+                            <?php $this->field('client_name', 'Client name'); ?>
+                            <?php $this->field('client_email', 'Client email', '', 'email'); ?>
+                            <?php $this->field('client_phone', 'Client phone'); ?>
+                            <?php $this->field('project_type', 'Invoice / project type', 'Hardscape Project'); ?>
+                        </div>
+                        <?php $this->field('project_address', 'Project address'); ?>
+                        <?php $this->field('project_name', 'Project name', 'Front Yard / Hardscape'); ?>
+                    </section>
+                    <section class="ldc-panel">
+                        <h2>Project overview</h2>
+                        <?php $this->textarea('project_overview', 'Overview', 'This proposal outlines the construction of...'); ?>
+                        <?php $this->textarea('standards', 'Standards / general notes', 'All work will be completed in accordance with applicable building standards and local codes.'); ?>
+                    </section>
+                    <section class="ldc-panel">
+                        <div class="ldc-section-heading"><h2>Scope of work</h2><button type="button" class="button" id="ldc-add-scope">+ Add section</button></div>
+                        <div id="ldc-scope-list"></div>
+                    </section>
+                    <section class="ldc-panel">
+                        <h2>Investment summary</h2>
+                        <label class="ldc-toggle"><input type="checkbox" name="auto_calculate_total" value="1" checked><span><strong>Calculate total from work items</strong><small>Turn this off to enter only the final total manually.</small></span></label>
+                        <label class="ldc-toggle"><input type="checkbox" name="apply_sales_tax" value="1" checked><span><strong>Apply US sales tax</strong><small>Turn this off for tax-exempt work or when tax is already included.</small></span></label>
+                        <div class="ldc-grid two">
+                            <?php $this->field('total', 'Subtotal before tax', '0.00', 'number', '0.01'); ?>
+                            <?php $this->field('tax_rate', 'Sales tax rate (%)', $company['default_tax_rate'], 'number', '0.001'); ?>
+                        </div>
+                        <?php $this->field('tax_note', 'Tax note', 'Included'); ?>
+                        <?php $this->textarea('includes', 'Price includes (one item per line)', "Labor\nMaterials\nTax\nHaul-away and disposal\nApplicable discounts"); ?>
+                        <?php $this->textarea('exclusions', 'Additional notes / exclusions'); ?>
+                    </section>
+                    <section class="ldc-panel">
+                        <div class="ldc-section-heading"><h2>Payment schedule</h2><button type="button" class="button" id="ldc-add-payment">+ Add payment</button></div>
+                        <div id="ldc-payment-list"></div>
+                        <p class="ldc-total-check" id="ldc-total-check"></p>
+                    </section>
+                    <section class="ldc-panel">
+                        <h2>Email</h2>
+                        <div class="ldc-grid two">
+                            <?php $this->field('email_subject', 'Subject', 'Your project proposal and invoice'); ?>
+                            <?php $this->field('email_cc', 'CC', '', 'email'); ?>
+                        </div>
+                        <?php $this->textarea('email_message', 'Message', "Hello,\n\nPlease find your project proposal and invoice below.\n\nThank you."); ?>
+                        <button type="button" class="button button-primary button-large" id="ldc-send-email">Send invoice by email</button>
+                    </section>
+                </form>
+                <aside class="ldc-preview-column">
+                    <div class="ldc-preview-label">Live preview</div>
+                    <article class="ldc-paper" id="ldc-invoice-preview" aria-label="Invoice preview"></article>
+                </aside>
+            </div>
+        </div>
+        <?php
+    }
+
+    private function render_invoice_list(bool $frontend): void {
+        $builder_url = add_query_arg('key', rawurlencode($this->get_access_key()), home_url('/' . self::PAGE_SLUG . '/'));
+        $company = $this->get_company_settings();
+        ?>
+        <div class="<?php echo $frontend ? 'ldc-frontend ' : 'wrap '; ?>ldc-app" id="ldc-invoice-list-app">
+            <div class="ldc-toolbar">
+                <div class="ldc-app-brand"><img src="<?php echo esc_url($this->get_logo_url()); ?>" alt="<?php echo esc_attr($company['company_name'] ?: 'Company logo'); ?>"><div><h1>Saved Invoices</h1><p>Open, export, import, or delete saved invoices.</p></div></div>
+                <div class="ldc-toolbar-actions">
+                    <a class="button button-primary" href="<?php echo esc_url($builder_url); ?>">Back to generator</a>
+                    <button type="button" class="button" id="ldc-list-export-all">Export all</button>
+                    <button type="button" class="button" id="ldc-list-import">Import JSON</button>
+                    <input type="file" id="ldc-list-import-file" accept="application/json,.json" hidden>
+                </div>
+            </div>
+            <div class="ldc-notice" id="ldc-list-notice" hidden></div>
+            <section class="ldc-panel ldc-list-panel">
+                <div class="ldc-section-heading"><h2>Invoice archive</h2><span id="ldc-list-count">Loading...</span></div>
+                <div class="ldc-list-table-wrap">
+                    <table class="ldc-list-table">
+                        <thead><tr><th>Invoice</th><th>Client</th><th>Project address</th><th>Updated</th><th>Actions</th></tr></thead>
+                        <tbody id="ldc-list-body"><tr><td colspan="5">Loading invoices...</td></tr></tbody>
+                    </table>
+                </div>
+            </section>
+        </div>
+        <?php
+    }
+
+    private function get_access_key(): string {
+        $key = (string) get_option(self::KEY_OPTION, '');
+        if (!$key) {
+            $key = wp_generate_password(32, false, false);
+            update_option(self::KEY_OPTION, $key, false);
+        }
+        return $key;
+    }
+
+    public static function activate(): void {
+        if (!get_option(self::KEY_OPTION)) {
+            update_option(self::KEY_OPTION, wp_generate_password(32, false, false), false);
+        }
+        if (!get_page_by_path(self::PAGE_SLUG)) {
+            wp_insert_post([
+                'post_title' => 'Invoice Builder',
+                'post_name' => self::PAGE_SLUG,
+                'post_content' => '[ldc_invoice_builder]',
+                'post_status' => 'publish',
+                'post_type' => 'page',
+                'comment_status' => 'closed',
+            ]);
+        }
+        if (!get_page_by_path(self::LIST_PAGE_SLUG)) {
+            wp_insert_post([
+                'post_title' => 'Invoice List',
+                'post_name' => self::LIST_PAGE_SLUG,
+                'post_content' => '[ldc_invoice_list]',
+                'post_status' => 'publish',
+                'post_type' => 'page',
+                'comment_status' => 'closed',
+            ]);
+        }
+    }
+
+    public function ensure_pages(): void {
+        if (!get_page_by_path(self::PAGE_SLUG) || !get_page_by_path(self::LIST_PAGE_SLUG)) { self::activate(); }
+    }
+
+    private function field(string $name, string $label, string $placeholder = '', string $type = 'text', string $step = ''): void {
+        printf('<label class="ldc-field"><span>%1$s</span><input type="%2$s" name="%3$s" placeholder="%4$s" %5$s></label>', esc_html($label), esc_attr($type), esc_attr($name), esc_attr($placeholder), $step ? 'step="' . esc_attr($step) . '" min="0"' : '');
+    }
+
+    private function textarea(string $name, string $label, string $placeholder = ''): void {
+        printf('<label class="ldc-field"><span>%1$s</span><textarea name="%2$s" rows="4" placeholder="%3$s"></textarea></label>', esc_html($label), esc_attr($name), esc_attr($placeholder));
+    }
+
+    private function authorize_request(): void {
+        check_ajax_referer('ldc_invoice_send', 'nonce');
+        $access_key = sanitize_text_field(wp_unslash($_POST['access_key'] ?? ''));
+        if (!current_user_can('manage_options') && (!$access_key || !hash_equals($this->get_access_key(), $access_key))) {
+            wp_send_json_error(['message' => 'This private link is not valid.'], 403);
+        }
+    }
+
+    public function manage_invoices(): void {
+        $this->authorize_request();
+        $action = sanitize_key(wp_unslash($_POST['action'] ?? ''));
+        $records = get_option(self::RECORDS_OPTION, []);
+        if (!is_array($records)) { $records = []; }
+
+        if ($action === 'ldc_list_invoices') {
+            uasort($records, static fn($a, $b) => strcmp((string) ($b['updated_at'] ?? ''), (string) ($a['updated_at'] ?? '')));
+            wp_send_json_success(['records' => array_values($records)]);
+        }
+
+        $id = sanitize_key(wp_unslash($_POST['id'] ?? ''));
+        if ($action === 'ldc_delete_invoice') {
+            if (!$id || !isset($records[$id])) { wp_send_json_error(['message' => 'Invoice not found.'], 404); }
+            unset($records[$id]);
+            update_option(self::RECORDS_OPTION, $records, false);
+            wp_send_json_success(['message' => 'Invoice deleted.']);
+        }
+
+        if ($action === 'ldc_save_invoice') {
+            $json = wp_unslash($_POST['invoice'] ?? '');
+            if (strlen($json) > 500000) { wp_send_json_error(['message' => 'Invoice data is too large.'], 413); }
+            $data = json_decode($json, true);
+            if (!is_array($data)) { wp_send_json_error(['message' => 'Invalid invoice data.'], 422); }
+            $id = $id ?: 'inv_' . strtolower(wp_generate_password(16, false, false));
+            $record = [
+                'id' => $id,
+                'invoice_number' => sanitize_text_field((string) ($data['invoice_number'] ?? 'Invoice')),
+                'client_name' => sanitize_text_field((string) ($data['client_name'] ?? '')),
+                'project_address' => sanitize_text_field((string) ($data['project_address'] ?? '')),
+                'updated_at' => current_time('mysql'),
+                'data' => $data,
+            ];
+            $records[$id] = $record;
+            update_option(self::RECORDS_OPTION, $records, false);
+            wp_send_json_success(['message' => 'Invoice saved.', 'record' => $record]);
+        }
+
+        wp_send_json_error(['message' => 'Unknown operation.'], 400);
+    }
+
+    public function send_invoice(): void {
+        $this->authorize_request();
+        $rate_key = 'ldc_invoice_mail_' . md5((string) ($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
+        $rate = (int) get_transient($rate_key);
+        if ($rate >= 10) { wp_send_json_error(['message' => 'Email limit reached. Please try again later.'], 429); }
+        $recipient = sanitize_email(wp_unslash($_POST['recipient'] ?? ''));
+        $cc = sanitize_email(wp_unslash($_POST['cc'] ?? ''));
+        $subject = sanitize_text_field(wp_unslash($_POST['subject'] ?? 'Invoice'));
+        $message = sanitize_textarea_field(wp_unslash($_POST['message'] ?? ''));
+        $invoice = wp_kses_post(wp_unslash($_POST['invoice_html'] ?? ''));
+        if (!$recipient || !is_email($recipient)) { wp_send_json_error(['message' => 'Enter a valid client email address.'], 422); }
+        if ($invoice === '') { wp_send_json_error(['message' => 'Invoice content is empty.'], 422); }
+        $headers = ['Content-Type: text/html; charset=UTF-8'];
+        if ($cc && is_email($cc)) { $headers[] = 'Cc: ' . $cc; }
+        $email_css = '<style>'
+            . '.ldc-doc-header{display:flex;justify-content:space-between;min-height:80px}.ldc-doc-logo{display:block;width:300px;height:auto}.ldc-doc-date,.ldc-license{font:bold 14px Arial,sans-serif}.ldc-license{margin:0 0 24px}.ldc-info-table,.ldc-main-table{width:100%;border-collapse:collapse;table-layout:fixed}.ldc-info-table th,.ldc-info-table td{border:2px solid #315a8a;padding:8px 10px}.ldc-info-table th{background:#e9e6d5}.ldc-main-table{margin-top:24px;border:2px solid #111}.ldc-main-table td{border-right:2px solid #111;vertical-align:top}.ldc-main-table td:last-child{width:13%;border-right:0}.ldc-project-strip td{background:#e9e6d5;border-bottom:2px solid #111;padding:10px 14px}.ldc-doc-content{padding:16px 14px 28px}.ldc-doc-content h2{text-align:center;font-size:18px}.ldc-doc-content h3{font-size:16px;margin-top:22px}.ldc-rule{height:1px;background:#888;margin:24px 0}.ldc-footer-strip td{height:28px;background:#b8c68b;border-top:2px solid #111}.ldc-signatures{display:flex;gap:28px;margin-top:42px}.ldc-signature-line{width:50%;border-top:1px solid #111;padding-top:5px}.ldc-contact-footer{margin-top:32px;font:11px/1.35 Arial,sans-serif;text-align:left}'
+            . '.ldc-license-row{display:flex;justify-content:space-between;margin:30px 6px 28px;font:bold 14px Arial,sans-serif}.ldc-info-table{border:2px solid #315a8a}'
+            . '.ldc-price-copy{min-height:112px;padding:16px 10px}.ldc-includes-row td,.ldc-price-row td,.ldc-payment-row td{border-top:2px solid #111}.ldc-price-row td{height:38px}.ldc-price-row td:last-child{padding:5px 8px;font:italic 19px Georgia,serif}.ldc-payment-row td:first-child{padding:12px 8px 28px}.ldc-payment-row h3{font:bold italic 18px Georgia,serif}'
+            . '.ldc-scope-entry{position:relative}.ldc-scope-entry-price{position:absolute;left:calc(100% + 45px);top:24px;width:58px;font:italic 16px Georgia,serif;white-space:nowrap}'
+            . '</style>';
+        $body = $email_css . '<div style="font:16px/1.6 Arial,sans-serif;color:#202124;max-width:760px;margin:auto">' . wpautop(esc_html($message)) . '<hr style="border:0;border-top:1px solid #d7dce2;margin:28px 0">' . $invoice . '</div>';
+        if (!wp_mail($recipient, $subject, $body, $headers)) { wp_send_json_error(['message' => 'WordPress could not send the email. Check FluentSMTP logs.'], 500); }
+        set_transient($rate_key, $rate + 1, HOUR_IN_SECONDS);
+        wp_send_json_success(['message' => 'Invoice sent to ' . $recipient . '.']);
+    }
+}
+
+new LDC_Invoice_Generator();
+register_activation_hook(__FILE__, ['LDC_Invoice_Generator', 'activate']);

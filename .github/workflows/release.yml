@@ -1,0 +1,31 @@
+name: Build WordPress release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Build installable plugin ZIP
+        shell: bash
+        run: |
+          mkdir -p build/ldc-invoice-generator
+          rsync -a --exclude='.git*' --exclude='build' --exclude='*.zip' ./ build/ldc-invoice-generator/
+          cd build
+          zip -r ../ldc-invoice-generator.zip ldc-invoice-generator
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: ldc-invoice-generator.zip
+
