@@ -2,7 +2,7 @@
 /**
  * Plugin Name: LDC Invoice Generator
  * Description: Private invoice/proposal builder with saved records, printing/PDF, JSON transfer, and email delivery.
- * Version: 0.9.15
+ * Version: 0.9.16
  * Author: Xmods
  * Author URI: https://github.com/xmods97
  * Update URI: https://github.com/xmods97/ldc-invoice-generator-
@@ -11,7 +11,7 @@
 if (!defined('ABSPATH')) { exit; }
 
 final class LDC_Invoice_Generator {
-    private const VERSION = '0.9.15';
+    private const VERSION = '0.9.16';
     private const SLUG = 'ldc-invoice-generator';
     private const PAGE_SLUG = 'invoice-builder';
     private const LIST_PAGE_SLUG = 'invoice-list';
@@ -65,7 +65,7 @@ final class LDC_Invoice_Generator {
         wp_enqueue_style('ldc-invoice-admin', $base . 'assets/admin.css', [], self::VERSION);
         wp_enqueue_script('ldc-pdfmake', $base . 'assets/vendor/pdfmake.min.js', [], '0.2.20', true);
         wp_enqueue_script('ldc-pdfmake-fonts', $base . 'assets/vendor/vfs_fonts.js', ['ldc-pdfmake'], '0.2.20', true);
-        wp_enqueue_script('ldc-invoice-admin', $base . 'assets/admin.js', ['ldc-pdfmake-fonts'], self::VERSION . '.1', true);
+        wp_enqueue_script('ldc-invoice-admin', $base . 'assets/admin.js', ['ldc-pdfmake-fonts'], self::VERSION, true);
         wp_enqueue_script('ldc-invoice-list', $base . 'assets/list.js', [], self::VERSION, true);
         wp_enqueue_script('ldc-invoice-settings', $base . 'assets/settings.js', [], self::VERSION, true);
         $company = $this->get_company_settings();
@@ -138,6 +138,10 @@ final class LDC_Invoice_Generator {
         return $site_icon ?: includes_url('images/w-logo-blue-white-bg.png');
     }
 
+    private function get_plugin_icon_url(): string {
+        return plugin_dir_url(__FILE__) . 'assets/plugin-icon.png';
+    }
+
     private function output_social_meta(string $page_type): void {
         $company = $this->get_company_settings();
         $company_name = $company['company_name'] ?: get_bloginfo('name');
@@ -153,15 +157,9 @@ final class LDC_Invoice_Generator {
         ];
         $title = trim($company_name . ' - ' . ($labels[$page_type] ?? 'Invoice Workspace'));
         $description = $descriptions[$page_type] ?? 'Private invoice workspace.';
-        $image = $this->get_logo_url();
-        $image_width = 0;
-        $image_height = 0;
-        $custom_logo_id = (int) get_theme_mod('custom_logo');
-        if ($custom_logo_id) {
-            $metadata = wp_get_attachment_metadata($custom_logo_id);
-            $image_width = (int) ($metadata['width'] ?? 0);
-            $image_height = (int) ($metadata['height'] ?? 0);
-        }
+        $image = $this->get_plugin_icon_url();
+        $image_width = 512;
+        $image_height = 512;
         $url = home_url(wp_unslash($_SERVER['REQUEST_URI'] ?? '/'));
         echo "\n" . '<meta property="og:type" content="website">' . "\n";
         echo '<meta property="og:site_name" content="' . esc_attr($company_name) . '">' . "\n";
@@ -174,7 +172,7 @@ final class LDC_Invoice_Generator {
             echo '<meta property="og:image:width" content="' . esc_attr((string) $image_width) . '">' . "\n";
             echo '<meta property="og:image:height" content="' . esc_attr((string) $image_height) . '">' . "\n";
         }
-        echo '<meta property="og:image:alt" content="' . esc_attr($company_name . ' logo') . '">' . "\n";
+        echo '<meta property="og:image:alt" content="LDC Invoice Generator logo">' . "\n";
         echo '<meta name="twitter:card" content="summary_large_image">' . "\n";
         echo '<meta name="twitter:title" content="' . esc_attr($title) . '">' . "\n";
         echo '<meta name="twitter:description" content="' . esc_attr($description) . '">' . "\n";
@@ -228,7 +226,11 @@ final class LDC_Invoice_Generator {
             'tested' => get_bloginfo('version'),
             'requires_php' => '7.4',
             'autoupdate' => (bool) get_option(self::AUTO_UPDATE_OPTION, false),
-            'icons' => [],
+            'icons' => [
+                '1x' => $this->get_plugin_icon_url(),
+                '2x' => $this->get_plugin_icon_url(),
+                'default' => $this->get_plugin_icon_url(),
+            ],
             'banners' => [],
         ];
     }
@@ -249,6 +251,11 @@ final class LDC_Invoice_Generator {
             'sections' => [
                 'description' => 'Private invoice and project proposal builder with PDF printing, saved records, import/export, email delivery, and configurable company settings.',
                 'changelog' => nl2br(esc_html($release['body'] ?: 'See the GitHub release for details.')),
+            ],
+            'icons' => [
+                '1x' => $this->get_plugin_icon_url(),
+                '2x' => $this->get_plugin_icon_url(),
+                'default' => $this->get_plugin_icon_url(),
             ],
         ];
     }
