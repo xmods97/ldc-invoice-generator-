@@ -2,7 +2,7 @@
 /**
  * Plugin Name: LDC Invoice Generator
  * Description: Private invoice/proposal builder with saved records, printing/PDF, JSON transfer, and email delivery.
- * Version: 0.8.0
+ * Version: 0.8.1
  * Author: Invoice Builder
  * Update URI: https://github.com/xmods97/ldc-invoice-generator-
  */
@@ -53,10 +53,10 @@ final class LDC_Invoice_Generator {
 
     private function load_assets(): void {
         $base = plugin_dir_url(__FILE__);
-        wp_enqueue_style('ldc-invoice-admin', $base . 'assets/admin.css', [], '0.8.0');
-        wp_enqueue_script('ldc-invoice-admin', $base . 'assets/admin.js', [], '0.8.0', true);
-        wp_enqueue_script('ldc-invoice-list', $base . 'assets/list.js', [], '0.8.0', true);
-        wp_enqueue_script('ldc-invoice-settings', $base . 'assets/settings.js', [], '0.8.0', true);
+        wp_enqueue_style('ldc-invoice-admin', $base . 'assets/admin.css', [], '0.8.1');
+        wp_enqueue_script('ldc-invoice-admin', $base . 'assets/admin.js', [], '0.8.1', true);
+        wp_enqueue_script('ldc-invoice-list', $base . 'assets/list.js', [], '0.8.1', true);
+        wp_enqueue_script('ldc-invoice-settings', $base . 'assets/settings.js', [], '0.8.1', true);
         $company = $this->get_company_settings();
         wp_localize_script('ldc-invoice-admin', 'LDCInvoice', [
             'ajaxUrl' => admin_url('admin-ajax.php'),
@@ -125,13 +125,58 @@ final class LDC_Invoice_Generator {
         return $site_icon ?: includes_url('images/w-logo-blue-white-bg.png');
     }
 
-    private function get_latest_release(): ?array {
+    private function output_social_meta(string $page_type): void {
+        $company = $this->get_company_settings();
+        $company_name = $company['company_name'] ?: get_bloginfo('name');
+        $labels = [
+            'builder' => 'Invoice Generator',
+            'list' => 'Saved Invoices',
+            'settings' => 'Company Settings',
+        ];
+        $descriptions = [
+            'builder' => 'Private invoice and project proposal workspace.',
+            'list' => 'Private saved invoice archive.',
+            'settings' => 'Private invoice company settings.',
+        ];
+        $title = trim($company_name . ' - ' . ($labels[$page_type] ?? 'Invoice Workspace'));
+        $description = $descriptions[$page_type] ?? 'Private invoice workspace.';
+        $image = $this->get_logo_url();
+        $image_width = 0;
+        $image_height = 0;
+        $custom_logo_id = (int) get_theme_mod('custom_logo');
+        if ($custom_logo_id) {
+            $metadata = wp_get_attachment_metadata($custom_logo_id);
+            $image_width = (int) ($metadata['width'] ?? 0);
+            $image_height = (int) ($metadata['height'] ?? 0);
+        }
+        $url = home_url(wp_unslash($_SERVER['REQUEST_URI'] ?? '/'));
+        echo "\n" . '<meta property="og:type" content="website">' . "\n";
+        echo '<meta property="og:site_name" content="' . esc_attr($company_name) . '">' . "\n";
+        echo '<meta property="og:title" content="' . esc_attr($title) . '">' . "\n";
+        echo '<meta property="og:description" content="' . esc_attr($description) . '">' . "\n";
+        echo '<meta property="og:url" content="' . esc_url($url) . '">' . "\n";
+        echo '<meta property="og:image" content="' . esc_url($image) . '">' . "\n";
+        echo '<meta property="og:image:secure_url" content="' . esc_url(set_url_scheme($image, 'https')) . '">' . "\n";
+        if ($image_width && $image_height) {
+            echo '<meta property="og:image:width" content="' . esc_attr((string) $image_width) . '">' . "\n";
+            echo '<meta property="og:image:height" content="' . esc_attr((string) $image_height) . '">' . "\n";
+        }
+        echo '<meta property="og:image:alt" content="' . esc_attr($company_name . ' logo') . '">' . "\n";
+        echo '<meta name="twitter:card" content="summary_large_image">' . "\n";
+        echo '<meta name="twitter:title" content="' . esc_attr($title) . '">' . "\n";
+        echo '<meta name="twitter:description" content="' . esc_attr($description) . '">' . "\n";
+        echo '<meta name="twitter:image" content="' . esc_url($image) . '">' . "\n";
+    }
+
+    private function get_latest_release(bool $force = false): ?array {
         $cache_key = 'ldc_invoice_github_release';
+        if ($force) { delete_site_transient($cache_key); }
         $cached = get_site_transient($cache_key);
         if (is_array($cached)) { return $cached; }
-        $response = wp_remote_get(self::UPDATE_API, [
+        $api_url = $force ? add_query_arg('nocache', time(), self::UPDATE_API) : self::UPDATE_API;
+        $response = wp_remote_get($api_url, [
             'timeout' => 12,
-            'headers' => ['Accept' => 'application/vnd.github+json'],
+            'headers' => ['Accept' => 'application/vnd.github+json', 'Cache-Control' => $force ? 'no-cache' : 'max-age=300'],
             'user-agent' => 'WordPress/LDC-Invoice-Generator',
         ]);
         if (is_wp_error($response) || wp_remote_retrieve_response_code($response) !== 200) { return null; }
@@ -152,13 +197,14 @@ final class LDC_Invoice_Generator {
             'body' => sanitize_textarea_field((string) ($release['body'] ?? '')),
             'published_at' => sanitize_text_field((string) ($release['published_at'] ?? '')),
         ];
-        set_site_transient($cache_key, $data, 6 * HOUR_IN_SECONDS);
+        set_site_transient($cache_key, $data, 5 * MINUTE_IN_SECONDS);
         return $data;
     }
 
     public function check_github_update($update, array $plugin_data, string $plugin_file, array $locales) {
         if ($plugin_file !== plugin_basename(__FILE__)) { return $update; }
-        $release = $this->get_latest_release();
+        $force = isset($_GET['force-check']) && current_user_can('update_plugins');
+        $release = $this->get_latest_release($force);
         if (!$release || version_compare((string) $plugin_data['Version'], $release['version'], '>=')) { return false; }
         return [
             'id' => self::UPDATE_REPO,
@@ -245,12 +291,14 @@ final class LDC_Invoice_Generator {
         $key = sanitize_text_field(wp_unslash($_GET['key'] ?? ''));
         $valid = $key && hash_equals($this->get_access_key(), $key);
         if (!$valid) { status_header(403); } else { $this->load_assets(); }
+        add_filter('wpseo_frontend_presenters', '__return_empty_array', 999);
         nocache_headers();
         ?><!doctype html><html <?php language_attributes(); ?>><head>
             <meta charset="<?php bloginfo('charset'); ?>">
             <meta name="viewport" content="width=device-width,initial-scale=1">
             <meta name="robots" content="noindex,nofollow,noarchive">
             <title>Private Invoice Builder</title>
+            <?php $this->output_social_meta($is_settings ? 'settings' : ($is_list ? 'list' : 'builder')); ?>
             <?php wp_head(); ?>
         </head><body class="ldc-standalone-page"><?php
         if ($valid) {
