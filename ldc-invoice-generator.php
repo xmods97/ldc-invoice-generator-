@@ -2,8 +2,9 @@
 /**
  * Plugin Name: LDC Invoice Generator
  * Description: Private invoice/proposal builder with saved records, printing/PDF, JSON transfer, and email delivery.
- * Version: 0.8.2
- * Author: Invoice Builder
+ * Version: 0.9.0
+ * Author: Xmods
+ * Author URI: https://github.com/xmods97
  * Update URI: https://github.com/xmods97/ldc-invoice-generator-
  */
 
@@ -17,6 +18,7 @@ final class LDC_Invoice_Generator {
     private const KEY_OPTION = 'ldc_invoice_access_key';
     private const RECORDS_OPTION = 'ldc_invoice_records';
     private const COMPANY_OPTION = 'ldc_invoice_company_settings';
+    private const AUTO_UPDATE_OPTION = 'ldc_invoice_auto_updates';
     private const UPDATE_API = 'https://api.github.com/repos/xmods97/ldc-invoice-generator-/releases/latest';
     private const UPDATE_REPO = 'https://github.com/xmods97/ldc-invoice-generator-';
     private const UPDATE_ASSET = 'ldc-invoice-generator.zip';
@@ -39,6 +41,7 @@ final class LDC_Invoice_Generator {
         }
         add_filter('update_plugins_github.com', [$this, 'check_github_update'], 10, 4);
         add_filter('plugins_api', [$this, 'github_plugin_information'], 20, 3);
+        add_filter('auto_update_plugin', [$this, 'allow_automatic_updates'], 10, 2);
     }
 
     public function register_menu(): void {
@@ -53,10 +56,10 @@ final class LDC_Invoice_Generator {
 
     private function load_assets(): void {
         $base = plugin_dir_url(__FILE__);
-        wp_enqueue_style('ldc-invoice-admin', $base . 'assets/admin.css', [], '0.8.2');
-        wp_enqueue_script('ldc-invoice-admin', $base . 'assets/admin.js', [], '0.8.2', true);
-        wp_enqueue_script('ldc-invoice-list', $base . 'assets/list.js', [], '0.8.2', true);
-        wp_enqueue_script('ldc-invoice-settings', $base . 'assets/settings.js', [], '0.8.2', true);
+        wp_enqueue_style('ldc-invoice-admin', $base . 'assets/admin.css', [], '0.9.0');
+        wp_enqueue_script('ldc-invoice-admin', $base . 'assets/admin.js', [], '0.9.0', true);
+        wp_enqueue_script('ldc-invoice-list', $base . 'assets/list.js', [], '0.9.0', true);
+        wp_enqueue_script('ldc-invoice-settings', $base . 'assets/settings.js', [], '0.9.0', true);
         $company = $this->get_company_settings();
         wp_localize_script('ldc-invoice-admin', 'LDCInvoice', [
             'ajaxUrl' => admin_url('admin-ajax.php'),
@@ -95,6 +98,7 @@ final class LDC_Invoice_Generator {
                 'default_tax_rate' => (string) max(0, (float) wp_unslash($_POST['default_tax_rate'] ?? '0')),
             ];
             update_option(self::COMPANY_OPTION, $settings, false);
+            update_option(self::AUTO_UPDATE_OPTION, !empty($_POST['auto_updates']), false);
             echo '<div class="notice notice-success"><p>Company settings saved.</p></div>';
         }
         $settings = $this->get_company_settings();
@@ -112,7 +116,7 @@ final class LDC_Invoice_Generator {
             $step = $type === 'number' ? ' step="0.001" min="0"' : '';
             echo '<tr><th scope="row"><label for="' . esc_attr($name) . '">' . esc_html($label) . '</label></th><td><input class="regular-text" id="' . esc_attr($name) . '" name="' . esc_attr($name) . '" type="' . esc_attr($type) . '" value="' . esc_attr($settings[$name]) . '"' . $step . '></td></tr>';
         }
-        ?></tbody></table><p><strong>Logo:</strong> the plugin uses the Site Logo configured under Appearance → Customize / Site Editor.</p><?php submit_button('Save company settings'); ?></form></div><?php
+        ?></tbody></table><p><label><input type="checkbox" name="auto_updates" value="1" <?php checked((bool) get_option(self::AUTO_UPDATE_OPTION, false)); ?>> <strong>Enable automatic plugin updates from GitHub Releases</strong></label></p><p><strong>Logo:</strong> the plugin uses the Site Logo configured under Appearance → Customize / Site Editor.</p><?php submit_button('Save company settings'); ?></form></div><?php
     }
 
     private function get_logo_url(): string {
@@ -214,6 +218,7 @@ final class LDC_Invoice_Generator {
             'package' => $release['package'],
             'tested' => get_bloginfo('version'),
             'requires_php' => '7.4',
+            'autoupdate' => (bool) get_option(self::AUTO_UPDATE_OPTION, false),
             'icons' => [],
             'banners' => [],
         ];
@@ -227,7 +232,7 @@ final class LDC_Invoice_Generator {
             'name' => 'Invoice Generator',
             'slug' => self::SLUG,
             'version' => $release['version'],
-            'author' => '<a href="' . esc_url(self::UPDATE_REPO) . '">Invoice Builder</a>',
+            'author' => '<a href="https://github.com/xmods97">Xmods</a>',
             'homepage' => self::UPDATE_REPO,
             'download_link' => $release['package'],
             'requires_php' => '7.4',
@@ -237,6 +242,15 @@ final class LDC_Invoice_Generator {
                 'changelog' => nl2br(esc_html($release['body'] ?: 'See the GitHub release for details.')),
             ],
         ];
+    }
+
+    public function allow_automatic_updates($update, $item) {
+        $slug = is_object($item) ? (string) ($item->slug ?? '') : '';
+        $plugin = is_object($item) ? (string) ($item->plugin ?? '') : '';
+        if ($slug === self::SLUG || $plugin === plugin_basename(__FILE__)) {
+            return (bool) get_option(self::AUTO_UPDATE_OPTION, false);
+        }
+        return $update;
     }
 
     public function render_page(): void {
@@ -320,7 +334,7 @@ final class LDC_Invoice_Generator {
         ?>
         <div class="<?php echo $frontend ? 'ldc-frontend ' : 'wrap '; ?>ldc-app" id="ldc-invoice-app">
             <div class="ldc-toolbar">
-                <div class="ldc-app-brand"><img src="<?php echo esc_url($this->get_logo_url()); ?>" alt="<?php echo esc_attr($company['company_name'] ?: 'Company logo'); ?>"><div><h1>Invoice Generator</h1><p>Fill in the fields, review the invoice, then save it as PDF or send it by email.</p></div></div>
+                <div class="ldc-app-brand"><img src="<?php echo esc_url($this->get_logo_url()); ?>" alt="<?php echo esc_attr($company['company_name'] ?: 'Company logo'); ?>"><div><h1>Invoice Generator</h1><p>Fill in the fields, review the invoice, then save it as PDF or send it by email.</p><a class="ldc-plugin-credit" href="https://github.com/xmods97" target="_blank" rel="noopener">Plugin by Xmods</a></div></div>
             </div>
             <nav class="ldc-toolbar-actions ldc-sticky-actions" aria-label="Invoice actions"><button type="button" class="button button-primary" id="ldc-print">Print / PDF</button><a class="button" href="<?php echo esc_url($list_url); ?>">Invoice list</a><a class="button" href="<?php echo esc_url($settings_url); ?>">Company settings</a><button type="button" class="button" id="ldc-new-invoice">New</button><button type="button" class="button" id="ldc-save-draft">Save invoice</button><button type="button" class="button" id="ldc-export-json">Export current</button><button type="button" class="button ldc-send-email-trigger">Send invoice by email</button></nav>
             <div class="ldc-notice" id="ldc-notice" hidden></div>
@@ -392,7 +406,7 @@ final class LDC_Invoice_Generator {
         ?>
         <div class="<?php echo $frontend ? 'ldc-frontend ' : 'wrap '; ?>ldc-app" id="ldc-invoice-list-app">
             <div class="ldc-toolbar">
-                <div class="ldc-app-brand"><img src="<?php echo esc_url($this->get_logo_url()); ?>" alt="<?php echo esc_attr($company['company_name'] ?: 'Company logo'); ?>"><div><h1>Saved Invoices</h1><p>Open, export, import, or delete saved invoices.</p></div></div>
+                <div class="ldc-app-brand"><img src="<?php echo esc_url($this->get_logo_url()); ?>" alt="<?php echo esc_attr($company['company_name'] ?: 'Company logo'); ?>"><div><h1>Saved Invoices</h1><p>Open, export, import, or delete saved invoices.</p><a class="ldc-plugin-credit" href="https://github.com/xmods97" target="_blank" rel="noopener">Plugin by Xmods</a></div></div>
             </div>
             <nav class="ldc-toolbar-actions ldc-sticky-actions" aria-label="Invoice archive actions"><a class="button button-primary" href="<?php echo esc_url($builder_url); ?>">Back to generator</a><a class="button" href="<?php echo esc_url($settings_url); ?>">Company settings</a><button type="button" class="button" id="ldc-list-export-all">Export all</button><button type="button" class="button" id="ldc-list-import">Import JSON</button><input type="file" id="ldc-list-import-file" accept="application/json,.json" hidden></nav>
             <div class="ldc-notice" id="ldc-list-notice" hidden></div>
@@ -415,7 +429,7 @@ final class LDC_Invoice_Generator {
         $list_url = add_query_arg('key', rawurlencode($this->get_access_key()), home_url('/' . self::LIST_PAGE_SLUG . '/'));
         ?>
         <div class="ldc-frontend ldc-app" id="ldc-company-settings-app">
-            <div class="ldc-toolbar"><div class="ldc-app-brand"><img src="<?php echo esc_url($this->get_logo_url()); ?>" alt="<?php echo esc_attr($company['company_name'] ?: 'Company logo'); ?>"><div><h1>Company Settings</h1><p>These values are stored only in the WordPress database.</p></div></div></div>
+            <div class="ldc-toolbar"><div class="ldc-app-brand"><img src="<?php echo esc_url($this->get_logo_url()); ?>" alt="<?php echo esc_attr($company['company_name'] ?: 'Company logo'); ?>"><div><h1>Company Settings</h1><p>These values are stored only in the WordPress database.</p><a class="ldc-plugin-credit" href="https://github.com/xmods97" target="_blank" rel="noopener">Plugin by Xmods</a></div></div></div>
             <nav class="ldc-toolbar-actions ldc-sticky-actions" aria-label="Settings navigation"><a class="button button-primary" href="<?php echo esc_url($builder_url); ?>">Back to generator</a><a class="button" href="<?php echo esc_url($list_url); ?>">Invoice list</a><button type="button" class="button" id="ldc-company-save">Save settings</button></nav>
             <div class="ldc-notice" id="ldc-company-notice" hidden></div>
             <form class="ldc-panel ldc-company-form" id="ldc-company-form" autocomplete="off">
@@ -428,6 +442,7 @@ final class LDC_Invoice_Generator {
                 </div>
                 <?php $this->public_setting_field('address_line_1', 'Address line 1', $company['address_line_1']); ?>
                 <?php $this->public_setting_field('address_line_2', 'Address line 2', $company['address_line_2']); ?>
+                <label class="ldc-toggle"><input type="checkbox" name="auto_updates" value="1" <?php checked((bool) get_option(self::AUTO_UPDATE_OPTION, false)); ?>><span><strong>Enable automatic plugin updates</strong><small>WordPress will install newer public GitHub Releases automatically while keeping this plugin active.</small></span></label>
                 <p class="ldc-settings-help"><strong>Logo:</strong> the generator uses the Site Logo configured in WordPress Appearance settings.</p>
             </form>
         </div>
@@ -555,6 +570,7 @@ final class LDC_Invoice_Generator {
             'default_tax_rate' => (string) max(0, (float) wp_unslash($_POST['default_tax_rate'] ?? '0')),
         ];
         update_option(self::COMPANY_OPTION, $settings, false);
+        update_option(self::AUTO_UPDATE_OPTION, !empty($_POST['auto_updates']), false);
         wp_send_json_success(['message' => 'Company settings saved.', 'settings' => $settings]);
     }
 

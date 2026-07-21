@@ -2,6 +2,8 @@
 
 Reusable private WordPress invoice and project-proposal builder.
 
+Author: [Xmods](https://github.com/xmods97)
+
 ## MVP features
 
 - live invoice preview based on the supplied LDC invoice layout;
@@ -28,4 +30,6 @@ Company data and private access keys are stored in the WordPress database and ar
 
 ## Automatic updates
 
-The plugin checks the latest public GitHub Release. Create and push a version tag such as `v0.7.0`; GitHub Actions builds an installable `ldc-invoice-generator.zip` release asset. WordPress then offers newer releases through its normal Plugins update screen.
+The plugin checks the latest public GitHub Release. Create and push a version tag such as `v0.9.0`; GitHub Actions builds an installable `ldc-invoice-generator.zip` release asset. WordPress then offers newer releases through its normal Plugins update screen.
+
+Automatic installation can be enabled from the protected **Company Settings** page or the WordPress **Invoices -> Company Settings** screen. Release archives retain the stable `ldc-invoice-generator/ldc-invoice-generator.php` path so WordPress keeps the plugin active after updating.
