@@ -2,8 +2,8 @@
 /**
  * Plugin Name: LDC Invoice Generator
  * Description: Private invoice/proposal builder with saved records, printing/PDF, JSON transfer, and email delivery.
- * Version: 0.9.22
- * Author: Xmods
+ * Version: 0.9.24
+ * Author: xmods97
  * Author URI: https://github.com/xmods97
  * Update URI: https://github.com/xmods97/ldc-invoice-generator-
  */
@@ -11,7 +11,7 @@
 if (!defined('ABSPATH')) { exit; }
 
 final class LDC_Invoice_Generator {
-    private const VERSION = '0.9.22';
+    private const VERSION = '0.9.24';
     private const SLUG = 'ldc-invoice-generator';
     private const PAGE_SLUG = 'invoice-builder';
     private const LIST_PAGE_SLUG = 'invoice-list';
@@ -243,7 +243,7 @@ final class LDC_Invoice_Generator {
             'name' => 'Invoice Generator',
             'slug' => self::SLUG,
             'version' => $release['version'],
-            'author' => '<a href="https://github.com/xmods97">Xmods</a>',
+            'author' => '<a href="https://github.com/xmods97">xmods97</a>',
             'homepage' => self::UPDATE_REPO,
             'download_link' => $release['package'],
             'requires_php' => '7.4',
@@ -405,7 +405,7 @@ final class LDC_Invoice_Generator {
         ?>
         <div class="<?php echo $frontend ? 'ldc-frontend ' : 'wrap '; ?>ldc-app" id="ldc-invoice-app">
             <div class="ldc-toolbar">
-                <div class="ldc-app-brand"><img src="<?php echo esc_url($this->get_logo_url()); ?>" alt="<?php echo esc_attr($company['company_name'] ?: 'Company logo'); ?>"><div><h1>Invoice Generator</h1><p>Fill in the fields, review the invoice, then save it as PDF or send it by email.</p><a class="ldc-plugin-credit" href="https://github.com/xmods97" target="_blank" rel="noopener">Plugin by Xmods · v<?php echo esc_html(self::VERSION); ?></a></div></div>
+                <div class="ldc-app-brand"><img src="<?php echo esc_url($this->get_logo_url()); ?>" alt="<?php echo esc_attr($company['company_name'] ?: 'Company logo'); ?>"><div><h1>Invoice Generator</h1><p>Fill in the fields, review the invoice, then save it as PDF or send it by email.</p><a class="ldc-plugin-credit" href="https://github.com/xmods97" target="_blank" rel="noopener">Plugin by xmods97 · v<?php echo esc_html(self::VERSION); ?></a></div></div>
             </div>
             <nav class="ldc-toolbar-actions ldc-sticky-actions" aria-label="Invoice actions"><button type="button" class="button button-primary" id="ldc-print">Print / PDF</button><button type="button" class="button ldc-send-button ldc-send-email-trigger">Send invoice by email</button><a class="button" href="<?php echo esc_url($list_url); ?>">Invoice list</a><a class="button" href="<?php echo esc_url($settings_url); ?>">Company settings</a><button type="button" class="button" id="ldc-new-invoice">New</button><button type="button" class="button" id="ldc-save-draft">Save invoice</button><button type="button" class="button" id="ldc-export-json">Export current</button></nav>
             <div class="ldc-notice" id="ldc-notice" hidden></div>
@@ -417,12 +417,23 @@ final class LDC_Invoice_Generator {
                             <?php $this->field('invoice_number', 'Invoice number', 'INV-2026-001'); ?>
                             <?php $this->field('invoice_date', 'Invoice date', '', 'date'); ?>
                             <?php $this->field('client_name', 'Client name'); ?>
+                            <?php $this->field('client_company', 'Client company'); ?>
                             <?php $this->field('client_email', 'Client email', '', 'email'); ?>
                             <?php $this->field('client_phone', 'Client phone'); ?>
+                            <?php $this->field('client_contact', 'Client contact person'); ?>
                             <?php $this->field('project_type', 'Invoice / project type', 'Hardscape Project'); ?>
                         </div>
+                        <?php $this->field('client_address', 'Client billing address'); ?>
+                        <?php $this->field('client_city_state_zip', 'Client city / state / ZIP'); ?>
                         <?php $this->field('project_address', 'Project address'); ?>
                         <?php $this->field('project_name', 'Project name', 'Front Yard / Hardscape'); ?>
+                        <div class="ldc-grid two">
+                            <?php $this->field('project_owner', 'Project owner / homeowner'); ?>
+                            <?php $this->field('project_manager', 'Estimator / project manager'); ?>
+                            <?php $this->field('project_start', 'Estimated start date', '', 'date'); ?>
+                            <?php $this->field('project_end', 'Estimated completion date', '', 'date'); ?>
+                        </div>
+                        <?php $this->field('project_permit', 'Permit / reference number'); ?>
                     </section>
                     <section class="ldc-panel">
                         <h2>Project overview</h2>
@@ -477,16 +488,16 @@ final class LDC_Invoice_Generator {
         ?>
         <div class="<?php echo $frontend ? 'ldc-frontend ' : 'wrap '; ?>ldc-app" id="ldc-invoice-list-app">
             <div class="ldc-toolbar">
-                <div class="ldc-app-brand"><img src="<?php echo esc_url($this->get_logo_url()); ?>" alt="<?php echo esc_attr($company['company_name'] ?: 'Company logo'); ?>"><div><h1>Saved Invoices</h1><p>Open, export, import, or delete saved invoices.</p><a class="ldc-plugin-credit" href="https://github.com/xmods97" target="_blank" rel="noopener">Plugin by Xmods · v<?php echo esc_html(self::VERSION); ?></a></div></div>
+                <div class="ldc-app-brand"><img src="<?php echo esc_url($this->get_logo_url()); ?>" alt="<?php echo esc_attr($company['company_name'] ?: 'Company logo'); ?>"><div><h1>Saved Invoices</h1><p>Open, export, import, or delete saved invoices.</p><a class="ldc-plugin-credit" href="https://github.com/xmods97" target="_blank" rel="noopener">Plugin by xmods97 · v<?php echo esc_html(self::VERSION); ?></a></div></div>
             </div>
-            <nav class="ldc-toolbar-actions ldc-sticky-actions" aria-label="Invoice archive actions"><a class="button button-primary" href="<?php echo esc_url($builder_url); ?>">Back to generator</a><a class="button" href="<?php echo esc_url($settings_url); ?>">Company settings</a><button type="button" class="button" id="ldc-list-export-all">Export all</button><button type="button" class="button" id="ldc-list-import">Import JSON</button><input type="file" id="ldc-list-import-file" accept="application/json,.json" hidden></nav>
+            <nav class="ldc-toolbar-actions ldc-sticky-actions" aria-label="Invoice archive actions"><a class="button button-primary" href="<?php echo esc_url($builder_url); ?>">Back to generator</a><a class="button" href="<?php echo esc_url($settings_url); ?>">Company settings</a><button type="button" class="button" id="ldc-list-export-selected">Export selected JSON</button><button type="button" class="button" id="ldc-list-export-all">Export all JSON</button><button type="button" class="button" id="ldc-list-excel-selected">Export selected Excel</button><button type="button" class="button" id="ldc-list-excel-all">Export all Excel</button><button type="button" class="button ldc-danger" id="ldc-list-delete-selected">Delete selected</button><button type="button" class="button" id="ldc-list-import">Import JSON</button><input type="file" id="ldc-list-import-file" accept="application/json,.json" hidden></nav>
             <div class="ldc-notice" id="ldc-list-notice" hidden></div>
             <section class="ldc-panel ldc-list-panel">
                 <div class="ldc-section-heading"><h2>Invoice archive</h2><span id="ldc-list-count">Loading...</span></div>
                 <div class="ldc-list-table-wrap">
                     <table class="ldc-list-table">
-                        <thead><tr><th>Invoice</th><th>Client</th><th>Project address</th><th>Updated</th><th>Actions</th></tr></thead>
-                        <tbody id="ldc-list-body"><tr><td colspan="5">Loading invoices...</td></tr></tbody>
+                        <thead><tr><th class="ldc-list-select"><input type="checkbox" id="ldc-list-select-all" aria-label="Select all invoices"></th><th>Invoice</th><th>Client</th><th>Project</th><th>Project address</th><th>Total</th><th>Updated</th><th>Actions</th></tr></thead>
+                        <tbody id="ldc-list-body"><tr><td colspan="8">Loading invoices...</td></tr></tbody>
                     </table>
                 </div>
             </section>
@@ -500,7 +511,7 @@ final class LDC_Invoice_Generator {
         $list_url = add_query_arg('key', rawurlencode($this->get_access_key()), home_url('/' . self::LIST_PAGE_SLUG . '/'));
         ?>
         <div class="ldc-frontend ldc-app" id="ldc-company-settings-app">
-            <div class="ldc-toolbar"><div class="ldc-app-brand"><img src="<?php echo esc_url($this->get_logo_url()); ?>" alt="<?php echo esc_attr($company['company_name'] ?: 'Company logo'); ?>"><div><h1>Company Settings</h1><p>These values are stored only in the WordPress database.</p><a class="ldc-plugin-credit" href="https://github.com/xmods97" target="_blank" rel="noopener">Plugin by Xmods · v<?php echo esc_html(self::VERSION); ?></a></div></div></div>
+            <div class="ldc-toolbar"><div class="ldc-app-brand"><img src="<?php echo esc_url($this->get_logo_url()); ?>" alt="<?php echo esc_attr($company['company_name'] ?: 'Company logo'); ?>"><div><h1>Company Settings</h1><p>These values are stored only in the WordPress database.</p><a class="ldc-plugin-credit" href="https://github.com/xmods97" target="_blank" rel="noopener">Plugin by xmods97 · v<?php echo esc_html(self::VERSION); ?></a></div></div></div>
             <nav class="ldc-toolbar-actions ldc-sticky-actions" aria-label="Settings navigation"><a class="button button-primary" href="<?php echo esc_url($builder_url); ?>">Back to generator</a><a class="button" href="<?php echo esc_url($list_url); ?>">Invoice list</a><button type="button" class="button" id="ldc-company-save">Save settings</button></nav>
             <div class="ldc-notice" id="ldc-company-notice" hidden></div>
             <form class="ldc-panel ldc-company-form" id="ldc-company-form" autocomplete="off">
@@ -622,7 +633,11 @@ final class LDC_Invoice_Generator {
                 'id' => $id,
                 'invoice_number' => sanitize_text_field((string) ($data['invoice_number'] ?? 'Invoice')),
                 'client_name' => sanitize_text_field((string) ($data['client_name'] ?? '')),
+                'client_company' => sanitize_text_field((string) ($data['client_company'] ?? '')),
+                'project_name' => sanitize_text_field((string) ($data['project_name'] ?? '')),
+                'project_type' => sanitize_text_field((string) ($data['project_type'] ?? '')),
                 'project_address' => sanitize_text_field((string) ($data['project_address'] ?? '')),
+                'total' => sanitize_text_field((string) ($data['total'] ?? '')),
                 'updated_at' => current_time('mysql'),
                 'data' => $data,
             ];

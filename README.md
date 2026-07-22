@@ -2,7 +2,7 @@
 
 Reusable private WordPress invoice and project-proposal builder.
 
-Author: [Xmods](https://github.com/xmods97)
+Author: [xmods97](https://github.com/xmods97)
 
 ## MVP features
 
@@ -10,6 +10,7 @@ Author: [Xmods](https://github.com/xmods97)
 - repeatable scope-of-work and payment sections;
 - automatic payment-total validation;
 - server-side invoice archive with editing and JSON transfer;
+- multi-select archive actions with JSON and Excel export;
 - company identity stored in WordPress settings, not plugin files;
 - print dialog optimized for US Letter and PDF saving;
 - JSON export for backup and reuse;
