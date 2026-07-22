@@ -2,7 +2,7 @@
 /**
  * Plugin Name: LDC Invoice Generator
  * Description: Private invoice/proposal builder with saved records, printing/PDF, JSON transfer, and email delivery.
- * Version: 0.9.18
+ * Version: 0.9.19
  * Author: Xmods
  * Author URI: https://github.com/xmods97
  * Update URI: https://github.com/xmods97/ldc-invoice-generator-
@@ -11,7 +11,7 @@
 if (!defined('ABSPATH')) { exit; }
 
 final class LDC_Invoice_Generator {
-    private const VERSION = '0.9.18';
+    private const VERSION = '0.9.19';
     private const SLUG = 'ldc-invoice-generator';
     private const PAGE_SLUG = 'invoice-builder';
     private const LIST_PAGE_SLUG = 'invoice-list';
@@ -435,8 +435,8 @@ final class LDC_Invoice_Generator {
                     </section>
                     <section class="ldc-panel">
                         <h2>Investment summary</h2>
-                        <label class="ldc-toggle"><input type="checkbox" name="auto_calculate_total" value="1" checked><span><strong>Calculate total from work items</strong><small>Turn this off to enter only the final total manually.</small></span></label>
-                        <label class="ldc-toggle"><input type="checkbox" name="apply_sales_tax" value="1" checked><span><strong>Apply US sales tax</strong><small>Turn this off for tax-exempt work or when tax is already included.</small></span></label>
+                        <label class="ldc-toggle"><input type="checkbox" name="auto_calculate_total" value="1"><span><strong>Calculate total from work items</strong><small>Turn this on to total the work item prices automatically.</small></span></label>
+                        <label class="ldc-toggle"><input type="checkbox" name="apply_sales_tax" value="1"><span><strong>Apply US sales tax</strong><small>Turn this on when sales tax should be added to the invoice.</small></span></label>
                         <div class="ldc-grid two">
                             <?php $this->field('total', 'Subtotal before tax', '0.00', 'number', '0.01'); ?>
                             <?php $this->field('tax_rate', 'Sales tax rate (%)', $company['default_tax_rate'], 'number', '0.001'); ?>
@@ -663,7 +663,20 @@ final class LDC_Invoice_Generator {
         if (!$recipient || !is_email($recipient)) { wp_send_json_error(['message' => 'Enter a valid client email address.'], 422); }
         $headers = ['Content-Type: text/html; charset=UTF-8'];
         if ($cc && is_email($cc)) { $headers[] = 'Cc: ' . $cc; }
-        $body = '<div style="font:16px/1.6 Arial,sans-serif;color:#202124;max-width:760px;margin:auto">' . wpautop(esc_html($message)) . '</div>';
+        $company = $this->get_company_settings();
+        $company_name = $company['company_name'] ?: get_bloginfo('name');
+        $body = '<div style="margin:0;padding:28px;background:#f3f6f9;font-family:Arial,sans-serif;color:#202428;">'
+            . '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;"><tr><td align="center">'
+            . '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:640px;border-collapse:collapse;background:#ffffff;border:1px solid #d9dee4;border-radius:12px;overflow:hidden;">'
+            . '<tr><td style="padding:26px 30px 18px;text-align:center;background:#ffffff;">'
+            . '<img src="' . esc_url($this->get_logo_url()) . '" alt="' . esc_attr($company_name) . '" style="display:inline-block;width:170px;max-width:60%;height:auto;">'
+            . '</td></tr>'
+            . '<tr><td style="padding:0 34px 28px;font-size:16px;line-height:1.65;color:#202428;">'
+            . wpautop(esc_html($message))
+            . '</td></tr>'
+            . '</table>'
+            . '</td></tr></table>'
+            . '</div>';
         if (!preg_match('#^data:application/pdf;base64,#', $pdf_data)) { wp_send_json_error(['message' => 'PDF attachment could not be generated. Please try again.'], 422); }
         $pdf_binary = base64_decode(substr($pdf_data, strpos($pdf_data, ',') + 1), true);
         if ($pdf_binary === false || strncmp($pdf_binary, '%PDF', 4) !== 0) { wp_send_json_error(['message' => 'Generated PDF attachment is invalid.'], 422); }
