@@ -11,6 +11,7 @@ Author: [xmods97](https://github.com/xmods97)
 - automatic payment-total validation;
 - server-side invoice archive with editing and JSON transfer;
 - multi-select archive actions with JSON and Excel export;
+- automatic invoice backup snapshots stored in a protected uploads folder;
 - company identity stored in WordPress settings, not plugin files;
 - print dialog optimized for US Letter and PDF saving;
 - JSON export for backup and reuse;
@@ -27,7 +28,7 @@ Author: [xmods97](https://github.com/xmods97)
 
 For PDF output, use **Print / PDF**, choose **Save as PDF**, and enable background graphics.
 
-Company data and private access keys are stored in the WordPress database and are excluded from release packages.
+Company data, private access keys, and saved invoices are stored in the WordPress database and are excluded from release packages. The invoice archive also writes a protected JSON backup snapshot after save/delete operations; use **Download backup** in the invoice archive to keep an offline copy.
 
 ## Automatic updates
 

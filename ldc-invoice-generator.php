@@ -2,7 +2,7 @@
 /**
  * Plugin Name: LDC Invoice Generator
  * Description: Private invoice/proposal builder with saved records, printing/PDF, JSON transfer, and email delivery.
- * Version: 0.9.24
+ * Version: 0.9.25
  * Author: xmods97
  * Author URI: https://github.com/xmods97
  * Update URI: https://github.com/xmods97/ldc-invoice-generator-
@@ -11,7 +11,7 @@
 if (!defined('ABSPATH')) { exit; }
 
 final class LDC_Invoice_Generator {
-    private const VERSION = '0.9.24';
+    private const VERSION = '0.9.25';
     private const SLUG = 'ldc-invoice-generator';
     private const PAGE_SLUG = 'invoice-builder';
     private const LIST_PAGE_SLUG = 'invoice-list';
@@ -37,7 +37,7 @@ final class LDC_Invoice_Generator {
         add_action('wp_ajax_nopriv_ldc_send_invoice', [$this, 'send_invoice']);
         add_action('wp_ajax_ldc_save_company_settings', [$this, 'save_company_settings_public']);
         add_action('wp_ajax_nopriv_ldc_save_company_settings', [$this, 'save_company_settings_public']);
-        foreach (['ldc_list_invoices', 'ldc_save_invoice', 'ldc_delete_invoice'] as $action) {
+        foreach (['ldc_list_invoices', 'ldc_save_invoice', 'ldc_delete_invoice', 'ldc_download_backup'] as $action) {
             add_action('wp_ajax_' . $action, [$this, 'manage_invoices']);
             add_action('wp_ajax_nopriv_' . $action, [$this, 'manage_invoices']);
         }
@@ -490,7 +490,7 @@ final class LDC_Invoice_Generator {
             <div class="ldc-toolbar">
                 <div class="ldc-app-brand"><img src="<?php echo esc_url($this->get_logo_url()); ?>" alt="<?php echo esc_attr($company['company_name'] ?: 'Company logo'); ?>"><div><h1>Saved Invoices</h1><p>Open, export, import, or delete saved invoices.</p><a class="ldc-plugin-credit" href="https://github.com/xmods97" target="_blank" rel="noopener">Plugin by xmods97 · v<?php echo esc_html(self::VERSION); ?></a></div></div>
             </div>
-            <nav class="ldc-toolbar-actions ldc-sticky-actions" aria-label="Invoice archive actions"><a class="button button-primary" href="<?php echo esc_url($builder_url); ?>">Back to generator</a><a class="button" href="<?php echo esc_url($settings_url); ?>">Company settings</a><button type="button" class="button" id="ldc-list-export-selected">Export selected JSON</button><button type="button" class="button" id="ldc-list-export-all">Export all JSON</button><button type="button" class="button" id="ldc-list-excel-selected">Export selected Excel</button><button type="button" class="button" id="ldc-list-excel-all">Export all Excel</button><button type="button" class="button ldc-danger" id="ldc-list-delete-selected">Delete selected</button><button type="button" class="button" id="ldc-list-import">Import JSON</button><input type="file" id="ldc-list-import-file" accept="application/json,.json" hidden></nav>
+            <nav class="ldc-toolbar-actions ldc-sticky-actions" aria-label="Invoice archive actions"><a class="button button-primary" href="<?php echo esc_url($builder_url); ?>">Back to generator</a><a class="button" href="<?php echo esc_url($settings_url); ?>">Company settings</a><button type="button" class="button" id="ldc-list-backup">Download backup</button><button type="button" class="button" id="ldc-list-export-selected">Export selected JSON</button><button type="button" class="button" id="ldc-list-export-all">Export all JSON</button><button type="button" class="button" id="ldc-list-excel-selected">Export selected Excel</button><button type="button" class="button" id="ldc-list-excel-all">Export all Excel</button><button type="button" class="button ldc-danger" id="ldc-list-delete-selected">Delete selected</button><button type="button" class="button" id="ldc-list-import">Import JSON</button><input type="file" id="ldc-list-import-file" accept="application/json,.json" hidden></nav>
             <div class="ldc-notice" id="ldc-list-notice" hidden></div>
             <section class="ldc-panel ldc-list-panel">
                 <div class="ldc-section-heading"><h2>Invoice archive</h2><span id="ldc-list-count">Loading...</span></div>
@@ -604,6 +604,35 @@ final class LDC_Invoice_Generator {
         }
     }
 
+    private function build_backup_payload(array $records): array {
+        uasort($records, static fn($a, $b) => strcmp((string) ($b['updated_at'] ?? ''), (string) ($a['updated_at'] ?? '')));
+        return [
+            'format' => 'ldc-invoices-backup-v1',
+            'plugin_version' => self::VERSION,
+            'generated_at' => current_time('mysql'),
+            'count' => count($records),
+            'invoices' => array_map(static fn($record) => [
+                'id' => (string) ($record['id'] ?? ''),
+                'data' => is_array($record['data'] ?? null) ? $record['data'] : [],
+            ], array_values($records)),
+        ];
+    }
+
+    private function write_invoice_backup(array $records): void {
+        $uploads = wp_upload_dir(null, false);
+        if (!empty($uploads['error']) || empty($uploads['basedir'])) { return; }
+        $dir = trailingslashit($uploads['basedir']) . 'ldc-invoice-backups';
+        if (!wp_mkdir_p($dir)) { return; }
+        if (!file_exists($dir . '/index.php')) {
+            file_put_contents($dir . '/index.php', "<?php\n// Silence is golden.\n");
+        }
+        if (!file_exists($dir . '/.htaccess')) {
+            file_put_contents($dir . '/.htaccess', "Require all denied\nDeny from all\n");
+        }
+        $filename = 'invoices-backup-' . substr(hash('sha256', $this->get_access_key()), 0, 16) . '.json';
+        file_put_contents(trailingslashit($dir) . $filename, wp_json_encode($this->build_backup_payload($records), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+    }
+
     public function manage_invoices(): void {
         $this->authorize_request();
         $action = sanitize_key(wp_unslash($_POST['action'] ?? ''));
@@ -615,11 +644,18 @@ final class LDC_Invoice_Generator {
             wp_send_json_success(['records' => array_values($records)]);
         }
 
+        if ($action === 'ldc_download_backup') {
+            $backup = $this->build_backup_payload($records);
+            $this->write_invoice_backup($records);
+            wp_send_json_success(['backup' => $backup, 'filename' => 'ldc-invoices-backup-' . gmdate('Y-m-d') . '.json']);
+        }
+
         $id = sanitize_key(wp_unslash($_POST['id'] ?? ''));
         if ($action === 'ldc_delete_invoice') {
             if (!$id || !isset($records[$id])) { wp_send_json_error(['message' => 'Invoice not found.'], 404); }
             unset($records[$id]);
             update_option(self::RECORDS_OPTION, $records, false);
+            $this->write_invoice_backup($records);
             wp_send_json_success(['message' => 'Invoice deleted.']);
         }
 
@@ -643,6 +679,7 @@ final class LDC_Invoice_Generator {
             ];
             $records[$id] = $record;
             update_option(self::RECORDS_OPTION, $records, false);
+            $this->write_invoice_backup($records);
             wp_send_json_success(['message' => 'Invoice saved.', 'record' => $record]);
         }
 
