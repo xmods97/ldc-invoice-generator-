@@ -2,7 +2,7 @@
 /**
  * Plugin Name: LDC Invoice Generator
  * Description: Private invoice/proposal builder with saved records, printing/PDF, JSON transfer, and email delivery.
- * Version: 0.9.27
+ * Version: 0.9.28
  * Author: xmods97
  * Author URI: https://github.com/xmods97
  * Update URI: https://github.com/xmods97/ldc-invoice-generator-
@@ -11,7 +11,7 @@
 if (!defined('ABSPATH')) { exit; }
 
 final class LDC_Invoice_Generator {
-    private const VERSION = '0.9.27';
+    private const VERSION = '0.9.28';
     private const SLUG = 'ldc-invoice-generator';
     private const PAGE_SLUG = 'invoice-builder';
     private const LIST_PAGE_SLUG = 'invoice-list';
@@ -37,6 +37,8 @@ final class LDC_Invoice_Generator {
         add_action('wp_ajax_nopriv_ldc_send_invoice', [$this, 'send_invoice']);
         add_action('wp_ajax_ldc_save_company_settings', [$this, 'save_company_settings_public']);
         add_action('wp_ajax_nopriv_ldc_save_company_settings', [$this, 'save_company_settings_public']);
+        add_action('wp_ajax_ldc_security_check', [$this, 'security_check']);
+        add_action('wp_ajax_nopriv_ldc_security_check', [$this, 'security_check']);
         foreach (['ldc_list_invoices', 'ldc_save_invoice', 'ldc_delete_invoice', 'ldc_download_backup'] as $action) {
             add_action('wp_ajax_' . $action, [$this, 'manage_invoices']);
             add_action('wp_ajax_nopriv_' . $action, [$this, 'manage_invoices']);
@@ -527,6 +529,11 @@ final class LDC_Invoice_Generator {
                 <label class="ldc-toggle"><input type="checkbox" name="auto_updates" value="1" <?php checked((bool) get_option(self::AUTO_UPDATE_OPTION, false)); ?>><span><strong>Enable automatic plugin updates</strong><small>WordPress will install newer public GitHub Releases automatically while keeping this plugin active.</small></span></label>
                 <p class="ldc-settings-help"><strong>Logo:</strong> the generator uses the Site Logo configured in WordPress Appearance settings.</p>
             </form>
+            <section class="ldc-panel ldc-security-panel">
+                <div class="ldc-section-heading"><h2>Security check</h2><button type="button" class="button button-primary" id="ldc-security-check">Run security check</button></div>
+                <p class="ldc-settings-help">Checks invoice encryption, private access, backup protection, and server support without showing client data.</p>
+                <div class="ldc-security-results" id="ldc-security-results" aria-live="polite"></div>
+            </section>
         </div>
         <?php
     }
@@ -665,6 +672,14 @@ final class LDC_Invoice_Generator {
         update_option(self::RECORDS_OPTION, $encrypted ?: $records, false);
     }
 
+    private function backup_file_path(): string {
+        $uploads = wp_upload_dir(null, false);
+        if (!empty($uploads['error']) || empty($uploads['basedir'])) { return ''; }
+        $dir = trailingslashit($uploads['basedir']) . 'ldc-invoice-backups';
+        $filename = 'invoices-backup-' . substr(hash('sha256', $this->get_access_key()), 0, 16) . '.json';
+        return trailingslashit($dir) . $filename;
+    }
+
     private function build_backup_payload(array $records): array {
         uasort($records, static fn($a, $b) => strcmp((string) ($b['updated_at'] ?? ''), (string) ($a['updated_at'] ?? '')));
         return [
@@ -690,10 +705,9 @@ final class LDC_Invoice_Generator {
         if (!file_exists($dir . '/.htaccess')) {
             file_put_contents($dir . '/.htaccess', "Require all denied\nDeny from all\n");
         }
-        $filename = 'invoices-backup-' . substr(hash('sha256', $this->get_access_key()), 0, 16) . '.json';
         $backup = $this->build_backup_payload($records);
         $encrypted = $this->encrypt_payload($backup);
-        file_put_contents(trailingslashit($dir) . $filename, wp_json_encode($encrypted ?: $backup, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+        file_put_contents($this->backup_file_path(), wp_json_encode($encrypted ?: $backup, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
     }
 
     public function manage_invoices(): void {
@@ -762,6 +776,67 @@ final class LDC_Invoice_Generator {
         update_option(self::COMPANY_OPTION, $settings, false);
         $this->set_automatic_updates(!empty($_POST['auto_updates']));
         wp_send_json_success(['message' => 'Company settings saved.', 'settings' => $settings]);
+    }
+
+    public function security_check(): void {
+        $this->authorize_request();
+        $stored = get_option(self::RECORDS_OPTION, []);
+        $records = $this->get_invoice_records();
+        $backup_path = $this->backup_file_path();
+        $backup_raw = ($backup_path && file_exists($backup_path)) ? (string) file_get_contents($backup_path) : '';
+        $backup_json = $backup_raw ? json_decode($backup_raw, true) : null;
+        $stored_json = wp_json_encode($stored);
+        $has_plaintext = is_string($stored_json) && preg_match('/client_email|client_phone|project_address|client_address|invoice_number/i', $stored_json);
+        $has_openssl = function_exists('openssl_encrypt') && function_exists('openssl_decrypt');
+        $backup_dir = $backup_path ? dirname($backup_path) : '';
+        $checks = [
+            [
+                'label' => 'Invoice database storage',
+                'status' => is_array($stored) && !empty($stored['encrypted']) ? 'ok' : 'warning',
+                'detail' => is_array($stored) && !empty($stored['encrypted']) ? 'Encrypted in WordPress database.' : 'Not encrypted yet or encryption is unavailable.',
+            ],
+            [
+                'label' => 'Cipher',
+                'status' => is_array($stored) && (($stored['cipher'] ?? '') === 'aes-256-gcm') ? 'ok' : 'warning',
+                'detail' => is_array($stored) && !empty($stored['cipher']) ? (string) $stored['cipher'] : 'No encrypted cipher detected.',
+            ],
+            [
+                'label' => 'OpenSSL support',
+                'status' => $has_openssl ? 'ok' : 'warning',
+                'detail' => $has_openssl ? 'Available on this server.' : 'OpenSSL is missing; encrypted storage cannot run.',
+            ],
+            [
+                'label' => 'Saved invoice count',
+                'status' => 'info',
+                'detail' => count($records) . ' invoice(s) readable by the plugin.',
+            ],
+            [
+                'label' => 'Plaintext client data in storage',
+                'status' => $has_plaintext ? 'warning' : 'ok',
+                'detail' => $has_plaintext ? 'Readable invoice field names were found in raw storage.' : 'No obvious invoice field names found in raw storage.',
+            ],
+            [
+                'label' => 'Backup file',
+                'status' => $backup_raw ? 'ok' : 'info',
+                'detail' => $backup_raw ? 'Backup snapshot exists.' : 'No backup snapshot yet. Save or download backup once to create it.',
+            ],
+            [
+                'label' => 'Backup encryption',
+                'status' => is_array($backup_json) && !empty($backup_json['encrypted']) ? 'ok' : ($backup_raw ? 'warning' : 'info'),
+                'detail' => is_array($backup_json) && !empty($backup_json['encrypted']) ? 'Backup file is encrypted on the server.' : ($backup_raw ? 'Backup exists but is not encrypted.' : 'Backup file not found yet.'),
+            ],
+            [
+                'label' => 'Backup folder protection',
+                'status' => ($backup_dir && file_exists($backup_dir . '/.htaccess') && file_exists($backup_dir . '/index.php')) ? 'ok' : 'warning',
+                'detail' => ($backup_dir && file_exists($backup_dir . '/.htaccess') && file_exists($backup_dir . '/index.php')) ? '.htaccess and index.php protection files exist.' : 'Protection files are missing or backup folder has not been created.',
+            ],
+            [
+                'label' => 'Private access key',
+                'status' => strlen($this->get_access_key()) >= 32 ? 'ok' : 'warning',
+                'detail' => 'Access key length: ' . strlen($this->get_access_key()) . ' characters.',
+            ],
+        ];
+        wp_send_json_success(['checks' => $checks, 'checked_at' => current_time('mysql'), 'version' => self::VERSION]);
     }
 
     public function send_invoice(): void {
