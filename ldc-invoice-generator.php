@@ -2,7 +2,7 @@
 /**
  * Plugin Name: LDC Invoice Generator
  * Description: Private invoice/proposal builder with saved records, printing/PDF, JSON transfer, and email delivery.
- * Version: 0.9.26
+ * Version: 0.9.27
  * Author: xmods97
  * Author URI: https://github.com/xmods97
  * Update URI: https://github.com/xmods97/ldc-invoice-generator-
@@ -11,7 +11,7 @@
 if (!defined('ABSPATH')) { exit; }
 
 final class LDC_Invoice_Generator {
-    private const VERSION = '0.9.26';
+    private const VERSION = '0.9.27';
     private const SLUG = 'ldc-invoice-generator';
     private const PAGE_SLUG = 'invoice-builder';
     private const LIST_PAGE_SLUG = 'invoice-list';
@@ -604,6 +604,67 @@ final class LDC_Invoice_Generator {
         }
     }
 
+    private function encryption_key(): string {
+        $material = implode('|', [
+            defined('AUTH_KEY') ? AUTH_KEY : '',
+            defined('SECURE_AUTH_KEY') ? SECURE_AUTH_KEY : '',
+            defined('LOGGED_IN_KEY') ? LOGGED_IN_KEY : '',
+            defined('NONCE_KEY') ? NONCE_KEY : '',
+            $this->get_access_key(),
+            home_url('/'),
+        ]);
+        return hash('sha256', $material, true);
+    }
+
+    private function encrypt_payload(array $payload): ?array {
+        if (!function_exists('openssl_encrypt') || !function_exists('random_bytes')) { return null; }
+        $json = wp_json_encode($payload, JSON_UNESCAPED_SLASHES);
+        if (!is_string($json)) { return null; }
+        $iv = random_bytes(12);
+        $tag = '';
+        $ciphertext = openssl_encrypt($json, 'aes-256-gcm', $this->encryption_key(), OPENSSL_RAW_DATA, $iv, $tag);
+        if ($ciphertext === false || strlen($tag) < 16) { return null; }
+        return [
+            'encrypted' => true,
+            'cipher' => 'aes-256-gcm',
+            'version' => 1,
+            'iv' => base64_encode($iv),
+            'tag' => base64_encode($tag),
+            'data' => base64_encode($ciphertext),
+        ];
+    }
+
+    private function decrypt_payload(array $payload): ?array {
+        if (empty($payload['encrypted']) || ($payload['cipher'] ?? '') !== 'aes-256-gcm' || !function_exists('openssl_decrypt')) { return null; }
+        $iv = base64_decode((string) ($payload['iv'] ?? ''), true);
+        $tag = base64_decode((string) ($payload['tag'] ?? ''), true);
+        $data = base64_decode((string) ($payload['data'] ?? ''), true);
+        if ($iv === false || $tag === false || $data === false) { return null; }
+        $json = openssl_decrypt($data, 'aes-256-gcm', $this->encryption_key(), OPENSSL_RAW_DATA, $iv, $tag);
+        if (!is_string($json) || $json === '') { return null; }
+        $decoded = json_decode($json, true);
+        return is_array($decoded) ? $decoded : null;
+    }
+
+    private function get_invoice_records(): array {
+        $stored = get_option(self::RECORDS_OPTION, []);
+        if (is_array($stored) && !empty($stored['encrypted'])) {
+            $records = $this->decrypt_payload($stored);
+            return is_array($records) ? $records : [];
+        }
+        if (is_array($stored)) {
+            $this->save_invoice_records($stored);
+            $this->write_invoice_backup($stored);
+            return $stored;
+        }
+        return [];
+    }
+
+    private function save_invoice_records(array $records): void {
+        $encrypted = $this->encrypt_payload($records);
+        update_option(self::RECORDS_OPTION, $encrypted ?: $records, false);
+    }
+
     private function build_backup_payload(array $records): array {
         uasort($records, static fn($a, $b) => strcmp((string) ($b['updated_at'] ?? ''), (string) ($a['updated_at'] ?? '')));
         return [
@@ -630,13 +691,15 @@ final class LDC_Invoice_Generator {
             file_put_contents($dir . '/.htaccess', "Require all denied\nDeny from all\n");
         }
         $filename = 'invoices-backup-' . substr(hash('sha256', $this->get_access_key()), 0, 16) . '.json';
-        file_put_contents(trailingslashit($dir) . $filename, wp_json_encode($this->build_backup_payload($records), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+        $backup = $this->build_backup_payload($records);
+        $encrypted = $this->encrypt_payload($backup);
+        file_put_contents(trailingslashit($dir) . $filename, wp_json_encode($encrypted ?: $backup, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
     }
 
     public function manage_invoices(): void {
         $this->authorize_request();
         $action = sanitize_key(wp_unslash($_POST['action'] ?? ''));
-        $records = get_option(self::RECORDS_OPTION, []);
+        $records = $this->get_invoice_records();
         if (!is_array($records)) { $records = []; }
 
         if ($action === 'ldc_list_invoices') {
@@ -654,7 +717,7 @@ final class LDC_Invoice_Generator {
         if ($action === 'ldc_delete_invoice') {
             if (!$id || !isset($records[$id])) { wp_send_json_error(['message' => 'Invoice not found.'], 404); }
             unset($records[$id]);
-            update_option(self::RECORDS_OPTION, $records, false);
+            $this->save_invoice_records($records);
             $this->write_invoice_backup($records);
             wp_send_json_success(['message' => 'Invoice deleted.']);
         }
@@ -678,7 +741,7 @@ final class LDC_Invoice_Generator {
                 'data' => $data,
             ];
             $records[$id] = $record;
-            update_option(self::RECORDS_OPTION, $records, false);
+            $this->save_invoice_records($records);
             $this->write_invoice_backup($records);
             wp_send_json_success(['message' => 'Invoice saved.', 'record' => $record]);
         }
