@@ -2,7 +2,7 @@
 /**
  * Plugin Name: LDC Invoice Generator
  * Description: Private invoice/proposal builder with saved records, printing/PDF, JSON transfer, and email delivery.
- * Version: 0.9.28
+ * Version: 0.9.29
  * Author: xmods97
  * Author URI: https://github.com/xmods97
  * Update URI: https://github.com/xmods97/ldc-invoice-generator-
@@ -11,7 +11,7 @@
 if (!defined('ABSPATH')) { exit; }
 
 final class LDC_Invoice_Generator {
-    private const VERSION = '0.9.28';
+    private const VERSION = '0.9.29';
     private const SLUG = 'ldc-invoice-generator';
     private const PAGE_SLUG = 'invoice-builder';
     private const LIST_PAGE_SLUG = 'invoice-list';
@@ -58,7 +58,7 @@ final class LDC_Invoice_Generator {
     }
 
     public function enqueue_assets(string $hook): void {
-        if ($hook !== 'toplevel_page_' . self::SLUG) { return; }
+        if ($hook !== 'toplevel_page_' . self::SLUG && strpos($hook, self::SLUG . '-settings') === false) { return; }
         $this->load_assets();
     }
 
@@ -113,7 +113,7 @@ final class LDC_Invoice_Generator {
             echo '<div class="notice notice-success"><p>Company settings saved.</p></div>';
         }
         $settings = $this->get_company_settings();
-        ?><div class="wrap"><h1>Invoice Company Settings</h1><p>These values are stored only in this WordPress database and are not part of the plugin files or update package.</p><form method="post"><?php wp_nonce_field('ldc_save_company', 'ldc_company_nonce'); ?><table class="form-table" role="presentation"><tbody><?php
+        ?><div class="wrap ldc-app" id="ldc-company-settings-app"><h1>Invoice Company Settings</h1><p>These values are stored only in this WordPress database and are not part of the plugin files or update package.</p><form method="post"><?php wp_nonce_field('ldc_save_company', 'ldc_company_nonce'); ?><table class="form-table" role="presentation"><tbody><?php
         $fields = [
             'company_name' => 'Company name',
             'license_number' => 'License number',
@@ -127,7 +127,7 @@ final class LDC_Invoice_Generator {
             $step = $type === 'number' ? ' step="0.001" min="0"' : '';
             echo '<tr><th scope="row"><label for="' . esc_attr($name) . '">' . esc_html($label) . '</label></th><td><input class="regular-text" id="' . esc_attr($name) . '" name="' . esc_attr($name) . '" type="' . esc_attr($type) . '" value="' . esc_attr($settings[$name]) . '"' . $step . '></td></tr>';
         }
-        ?></tbody></table><p><label><input type="checkbox" name="auto_updates" value="1" <?php checked((bool) get_option(self::AUTO_UPDATE_OPTION, false)); ?>> <strong>Enable automatic plugin updates from GitHub Releases</strong></label></p><p><strong>Logo:</strong> the plugin uses the Site Logo configured under Appearance → Customize / Site Editor.</p><?php submit_button('Save company settings'); ?></form></div><?php
+        ?></tbody></table><p><label><input type="checkbox" name="auto_updates" value="1" <?php checked((bool) get_option(self::AUTO_UPDATE_OPTION, false)); ?>> <strong>Enable automatic plugin updates from GitHub Releases</strong></label></p><p><strong>Logo:</strong> the plugin uses the Site Logo configured under Appearance → Customize / Site Editor.</p><?php submit_button('Save company settings'); ?></form><section class="ldc-panel ldc-security-panel"><div class="ldc-section-heading"><h2>Security check</h2><button type="button" class="button button-primary" id="ldc-security-check">Run security check</button></div><p class="ldc-settings-help">Checks invoice encryption, private access, backup protection, and server support without showing client data.</p><div class="ldc-security-results" id="ldc-security-results" aria-live="polite"></div></section></div><?php
     }
 
     private function get_logo_url(): string {
